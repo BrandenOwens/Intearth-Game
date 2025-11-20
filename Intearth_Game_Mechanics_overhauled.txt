@@ -1,3 +1,260 @@
+Intearth City Duel – Game Mechanics & Module Architecture Document
+Version: 0.4
+
+Updated: 2025-11-19
+Modules Introduced: Yes
+Module 1: projectiles.py (Created & saved at:
+C:\Users\obran\OneDrive\Desktop\Dearth\Intearth\projectiles.py)
+
+0. MODULE ARCHITECTURE (NEW)
+
+Intearth City Duel is transitioning from a single giant Python file to a modular codebase.
+This improves maintainability, clarity, and allows AI (ChatGPT) to safely update code one module at a time without breaking the whole project.
+
+0.1 Why Use Modules?
+
+Prevents file-size problems
+
+Prevents merge confusion
+
+Allows the AI to operate on isolated systems
+
+Lets the main file act as an orchestrator only
+
+Cleaner debugging
+
+Code can be replaced in small chunks instead of rewriting 8k–12k lines
+
+0.2 Folder Structure
+
+All modules will be placed in:
+
+C:\Users\obran\OneDrive\Desktop\Dearth\Intearth\
+
+
+Final structure:
+
+Intearth/
+    main.py
+    projectiles.py
+    fighters.py
+    weapons.py
+    items.py
+    citygen.py
+    ui_shop.py
+    ui_pause.py
+    helpers.py
+    constants.py
+    docs/
+        mechanics.txt
+
+0.3 How Modules Work Together
+
+Each module handles one subsystem:
+
+Module	Role
+projectiles.py	All projectile logic (wand, bow, staff, splash, update loop)
+fighters.py	Player + Enemy movement, combat, hitboxes, knockback
+weapons.py	Weapon class, stat generation, rarity
+items.py	Shared base item class + armor
+citygen.py	Stage generation, platforms, background, merchants, enemies
+ui_shop.py	Merchant shop UI
+ui_pause.py	Pause / inventory UI
+helpers.py	Utility functions (merchant proximity detection, etc.)
+constants.py	Global values (WORLD_WIDTH, GROUND_Y, colors, gravity)
+main.py	The only file that runs the game & ties modules together
+0.4 How AI Should Interact
+
+When you want a change:
+
+You specify the module (ex: “update fighters.py”)
+
+You upload that module from your PC
+
+AI updates the full module and returns a complete replacement
+
+You save the updated file back into the folder
+
+This avoids partial edits and ensures the game stays consistent.
+
+1. OVERVIEW
+
+(Same as previous version, preserved and unchanged)
+Intearth City Duel is a 2D platformer arena set on city rooftops.
+The player traverses vertically layered platforms while fighting enemies and trading with merchants.
+
+(All content in this section remains unchanged; citing original document)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+2. CORE LOOP
+
+(Identical to the previous version, unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+3. STAGE & PLATFORM DESIGN
+
+(Unchanged, no gameplay modifications required)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+4. MERCHANTS
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+5. PLAYER STATS
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+6. ITEMS & INVENTORY
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+7. WEAPONS (MELEE / RANGED)
+
+(Unchanged; visual details preserved)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+8. KNOCKBACK SYSTEM
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+9. PROJECTILE SYSTEM
+Now Fully Modular
+
+Everything related to projectile behavior, visuals, and updating now resides in:
+
+projectiles.py
+
+
+Module responsibilities:
+
+Projectile class
+
+Splash damage
+
+Bow / wand / staff projectile logic
+
+Knockback behavior
+
+PROJECTILES global list
+
+spawn_projectile()
+
+update_projectiles()
+
+Drawing
+
+(Core gameplay logic unchanged, just reorganized)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+10. PROCEDURAL WEAPON GENERATION
+
+(No logic changed, but this will later move into weapons.py)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+11. ENEMY BEHAVIOR
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+12. ENEMY VISUAL VARIETY
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+13. LOOT RULES
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+14. SHOP UI
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+15. PAUSE MENU / INVENTORY
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+16. HUD
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+17. AREA PROGRESSION
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+18. FUTURE MECHANICS
+
+(Unchanged)
+
+
+d530901a-8d63-40da-90c1-f48fc35…
+
+19. MODULE ROADMAP (NEW)
+
+As modules are created, this area will track progress.
+
+Completed:
+
+projectiles.py — full system extracted and functional
+
+Next module choices:
+
+fighters.py (large, core physics + combat)
+
+weapons.py / items.py
+
+citygen.py
+
+ui_shop.py
+
+ui_pause.py
+
+helpers.py
+
+constants.py
+
 Intearth City Duel - Game Mechanics Document
 ===========================================
 

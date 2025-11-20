@@ -1,0 +1,21 @@
+# constants.py
+
+# Window
+WINDOW_WIDTH = 1280
+WINDOW_HEIGHT = 720
+FPS = 60
+
+# World
+WORLD_WIDTH = 3000
+GROUND_Y = 600
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (80, 80, 80)
+GREEN = (0, 200, 0)
+
+# Physics
+GRAVITY = 0.5
+MOVE_SPEED = 4
+JUMP_FORCE = -12
