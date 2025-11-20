@@ -1,0 +1,447 @@
+Intearth City Duel - Game Mechanics Document
+===========================================
+
+Version: 0.3
+Last updated: 2025-11-19
+
+OVERVIEW
+--------
+Intearth City Duel is a 2D platformer arena set on the rooftops and upper
+levels of a stylized city. The player fights enemies, climbs between platforms,
+and trades with merchants that appear in each Area.
+
+Each "Area" (or stage) is a slice of city with:
+- Multiple vertical platforms (building-like ledges)
+- Ladders and doors for vertical travel
+- Enemies with stage-scaled stats and some visual variety
+- Exactly one merchant that can buy and sell equipment
+
+The design goal is to have combat driven by clearly readable weapons,
+projectiles, and knockback, with enemies that feel like individuals rather than
+identical clones.
+
+CORE LOOP
+---------
+- Spawn into an Area with multiple platforms and a skyline background.
+- Move, jump, and climb to traverse the level.
+- Fight enemies using melee or ranged weapons.
+- Collect money and gear dropped from enemies.
+- Find the merchant and trade for better equipment.
+- Reach the far right edge of the level to advance to the next Area.
+
+STAGE & PLATFORM DESIGN
+-----------------------
+- WORLD_WIDTH defines the horizontal size of each city slice.
+- The ground is a long, solid platform at y = GROUND_Y.
+- Additional platforms are generated at different heights, giving a
+  multi-level "building rooftop" feel.
+- Many platforms have ladders that connect them down toward the ground.
+- Doors are placed near platforms (visual only for now) to suggest building
+  entrances.
+
+Vertical Travel
+- Player can jump between platforms.
+- Ladders allow controlled climbing up and down using W/S.
+- While climbing, gravity is suppressed so actors do not slide off.
+
+Background Buildings
+- Two parallax-like layers of buildings are generated per Area:
+  - Back layer: tall silhouettes, darker and further away.
+  - Front layer: lower buildings, slightly brighter.
+- These use random widths and heights to create a varied skyline.
+
+MERCHANTS
+---------
+Design:
+- Exactly one merchant per Area, placed on a reachable non-ground platform.
+
+Current behavior (code target):
+- During Area generation, one platform is chosen as the merchant platform.
+- A Fighter with is_merchant=True is spawned there.
+
+Merchant rules:
+- Merchants use the Fighter class but are flagged is_merchant = True.
+- Merchants do not move or attack.
+- Merchants have their own inventory and money pool.
+- Player can open the shop UI by pressing E when standing near a merchant.
+- Merchants can buy items from the player and sell items to the player.
+- Merchants do not currently drop loot when killed (if killing is allowed).
+
+PLAYER STATS
+------------
+- HP: starts at 100.
+- Damage: base damage plus weapon damage.
+- Armor: reduces incoming damage on hit.
+- Attack delay (in frames): lower delay = faster attacks.
+- Money: used to buy items from merchants.
+
+HP Regeneration
+- Only the player regenerates HP over time.
+- After taking damage, there is a 3-second delay (regen_cooldown) before
+  regen can start.
+- Once regen starts, the player regains 1 HP per second until full.
+
+ITEMS & INVENTORY
+-----------------
+Two main item categories:
+
+- Weapons
+  - Fields: dmg, atk_speed_bonus, knockback, visual, ranged flag
+  - May also implicitly define projectile behavior (for ranged types).
+
+- Armor
+  - Fields: armor (primary), optionally other modifiers in the future.
+  - Armor pieces are thematically split into:
+    - Helmet (head slot)
+    - Chest armor (torso slot)
+    - Leggings (legs slot)
+  - For now, armor is mechanically one combined value, but visuals are
+    allowed to show separate pieces.
+
+Rarity colors are computed from a power score based on an item's stats:
+- Uncommon:    Green
+- Rare:        Blue
+- Epic:        Purple
+- Legendary:   Orange
+- Mythic:      Red
+- Divine:      Gold (highest scores)
+
+A "common" / gray tier may be implied when stats are weak and no special
+rarity color is used.
+
+MELEE WEAPONS (CURRENT TYPES)
+-----------------------------
+Visual styles (intent):
+
+- Short Sword
+  - Straight line blade.
+  - Visually compact, least knockback.
+- Long Sword
+  - T-shaped blade: long blade with cross-guard.
+  - Medium knockback.
+- Battle Axe
+  - Handle with a D-shaped head on the end.
+  - Largest knockback of the melee set.
+
+Implementation:
+- Melee weapons are generated based on per-stage damage and knockback ranges.
+- Enemies and merchants primarily use these melee weapons at present.
+- Knockback contribution from melee is determined both by the weapon's
+  base knockback stat and by a type-based multiplier (see Knockback System).
+
+RANGED WEAPON TYPES (PLAYER-AVAILABLE)
+--------------------------------------
+All ranged weapons:
+- Are identified by weapon.ranged == True.
+- Use projectiles for damage, not melee hitboxes.
+- Still play an attack animation, but do not create melee swing hitboxes.
+
+Types:
+
+1) Wand
+   Identity:
+   - Fast, short-range magic.
+
+   Projectile visual:
+   - Small spark "*" drawn as a tiny glowing orb.
+
+   Behavior:
+   - High projectile speed.
+   - Short projectile range.
+   - Slightly lower damage.
+   - Faster attack rate.
+   - No guaranteed knockback; instead the wand has a low chance to apply a
+     small knockback when it rolls a random knockback stat (with a strong
+     reduction multiplier so knockback is subtle).
+
+2) Bow
+   Identity:
+   - Balanced long-range weapon.
+
+   Bow visual (held):
+   - True D-shape:
+     - String: vertical line anchored near the hand.
+     - Limbs: curved / angled forward toward the facing direction, forming an
+       open D shape that does not clip at the edge.
+
+   Projectile visual:
+   - Arrow "-->" represented as a short horizontal projectile with a
+     directional line segment.
+
+   Behavior:
+   - Medium projectile speed.
+   - Long projectile range.
+   - Standard damage and attack rate.
+   - Medium knockback on hit.
+
+3) Staff
+   Identity:
+   - Slow, heavy magic with area-effect impact.
+
+   Staff visual (held):
+   - Vertical casting focus:
+     - Shaft mostly vertical, anchored to the hand.
+     - Slight tilt left/right based on horizontal movement speed.
+     - Extra tilt or animation during attacks.
+
+   Projectile visual:
+   - Central orb with spikes in all directions, conceptually:
+
+         *
+       * O *
+         *
+
+   Behavior:
+   - Slow projectile speed.
+   - Medium-long projectile range.
+   - High damage.
+   - Strong knockback.
+   - Splash damage around the hit location.
+
+KNOCKBACK SYSTEM (MELEE + RANGED)
+---------------------------------
+Knockback is used to make combat feel less "sticky" and to prevent enemies
+from standing directly on top of the player.
+
+Each weapon has a base knockback stat and also receives a type-based modifier.
+Higher knockback pushes targets farther away horizontally.
+
+Relative knockback by weapon type:
+
+- Short Sword
+  - Lowest melee knockback.
+  - Intended as a precise, controlled weapon that does not throw enemies far.
+
+- Long Sword
+  - Medium melee knockback.
+  - Pushes enemies back a noticeable but manageable distance.
+
+- Battle Axe
+  - Highest melee knockback.
+  - Strong shove on hit; enemies visibly recoil.
+
+- Wand
+  - Base design: no constant knockback.
+  - When knockback is rolled for a wand, it is applied at a reduced
+    multiplier (subtle push) and may be treated as a low probability effect.
+
+- Bow
+  - Medium knockback per hit.
+  - Helps keep enemies at range without launching them off-screen.
+
+- Staff
+  - Big knockback on direct hits.
+  - Splash damage may apply reduced knockback to nearby enemies to avoid
+    chaotic scattering.
+
+Projectiles inherit knockback from their weapon and type multipliers.
+
+PROJECTILE SYSTEM (CURRENT DESIGN)
+----------------------------------
+- A global PROJECTILES list holds all active projectiles.
+- When a Fighter with a ranged weapon starts an attack, the code:
+  - Flags the attack type as "shoot".
+  - Spawns a Projectile instance via a helper function (e.g. spawn_projectile).
+- Ranged weapons do NOT create melee hitboxes: get_attack_hitbox() returns
+  None for ranged weapons.
+
+Projectile properties:
+- Position (x, y)
+- Velocity (vx, vy)
+- Max travel distance
+- Total distance traveled
+- Damage and knockback
+- Owner (the Fighter that fired it)
+- Kind: "wand", "bow", or "staff"
+- Color: derived from the weapon's rarity color when available
+- Optional splash radius (used for staff projectiles)
+
+Projectile update rules:
+- Each frame, projectiles move along a straight line (no gravity, no arc).
+- Distance traveled is accumulated; once it exceeds max_distance, the
+  projectile is removed.
+- Projectiles check for collision with Fighters:
+  - The owner is ignored to prevent self hits.
+  - On first successful hit:
+    - The target takes damage.
+    - Knockback is applied based on projectile direction and knockback value.
+    - For staff projectiles, nearby enemies in a radius take splash damage.
+    - The projectile is then removed.
+
+Projectile visuals:
+- Wand: small glowing circle.
+- Bow: short horizontal line suggesting an arrow in flight.
+- Staff: orb with multiple short spikes drawn outward from the center.
+
+PROCEDURAL WEAPON GENERATION (DESIGN)
+-------------------------------------
+Base stats to roll per weapon:
+- damage: integer in a base range (per stage).
+- attack_speed_factor: float that adjusts the attack delay.
+- knockback: float in a range (per stage).
+
+For ranged weapons only:
+- projectile_speed: float (e.g., 7–14).
+- projectile_range: integer (e.g., 250–600).
+- splash_radius: for staff-type weapons only.
+
+Type multipliers (example intent):
+- Wand:
+  - projectile_speed *= 1.5
+  - projectile_range *= 0.6
+  - damage            *= 0.8
+  - attack_speed_factor biased faster
+  - knockback reduced or frequently zeroed.
+
+- Bow:
+  - projectile_speed *= 1.0
+  - projectile_range *= 1.2
+  - damage            *= 1.0
+  - attack_speed_factor unchanged
+  - medium knockback.
+
+- Staff:
+  - projectile_speed *= 0.5
+  - projectile_range *= 0.8
+  - damage            *= 1.6
+  - splash_radius set to a positive value
+  - high knockback.
+
+Current implementation state:
+- Enemy and merchant melee weapons are generated with stage-based ranges
+  for damage and knockback.
+- Ranged weapons for enemies/merchants and full projectile stat multipliers
+  are still a TODO.
+
+Item Pricing:
+- Price is computed from damage, knockback, and attack speed bonus, then
+  converted into a gold cost.
+- Rarity is derived from the combined stat power and can be used to visually
+  color the item name or its projectile.
+
+ENEMY BEHAVIOR
+--------------
+Enemies share the Fighter class (is_player=False, is_merchant=False).
+
+Current simple behaviors:
+- If the player is outside an aggro range, enemies stop moving.
+- Within aggro range, enemies move horizontally toward the player.
+- If the player is above them and conditions are met, enemies may jump.
+- Enemies currently use melee attacks only; they call start_attack("swing")
+  when close enough.
+
+Design improvements (target behavior):
+- Enemies should not stand *directly* on the player while attacking.
+- When enemies hit or are hit, knockback should push them backward, creating
+  clear spacing and reducing "face-hugging" behavior.
+- After being knocked back, enemies:
+  - Briefly pause or "recover" before advancing again.
+  - Re-acquire the player and close distance using the same aggro logic.
+
+Future behaviors (not yet implemented):
+- Ranged enemy variants using bows/wands/staffs.
+- Patrol / idle movement when not aggroed.
+- Smarter jump decisions for vertical chase.
+
+ENEMY VISUAL VARIETY & EQUIPMENT
+--------------------------------
+To avoid all enemies looking identical, fighters can be visually varied via:
+
+Body proportions (design):
+- Each enemy can receive random scale factors for:
+  - Head size (width/height).
+  - Torso height.
+  - Leg length.
+- These scale factors are visual only and do not alter hitbox size in the
+  initial implementation (hitbox remains tied to the Fighter rect).
+
+Armor visuals:
+- Enemies can spawn with visible armor pieces:
+  - Helmet
+  - Chest armor
+  - Leggings
+- These may be mapped to the same underlying armor stat or later split into
+  separate armor slots.
+- Armor presence can be hooked to the armor value rolled for that enemy:
+  - Higher armor → more pieces visible.
+
+Equipment drops:
+- Non-merchant enemies have a chance to drop:
+  - Their weapon.
+  - Their armor (helmet / chest / leggings treated as one armor item for now).
+- Drop chance can be tuned per type or globally (e.g., 20–30% chance to drop
+  one of their items).
+- Dropped gear is instantiated as inventory items when the enemy dies and can
+  be added to the player's inventory.
+
+LOOT RULES
+----------
+Current / target behavior:
+- When non-merchant enemies die:
+  - Their money is transferred to the player.
+  - Optionally, one or more of their equipment items may be awarded to the
+    player based on a drop chance.
+- Merchants do not drop loot.
+
+SHOP UI
+-------
+- Player can open the shop UI by pressing E near a merchant.
+- Two-column layout:
+  - Left: Merchant inventory.
+  - Right: Player inventory.
+- TAB switches focus between columns.
+- UP/DOWN moves the selected item within the active column.
+- B buys the selected item (when focus is on merchant column).
+- S sells the selected item (when focus is on player column).
+- Player and merchant money are tracked separately.
+
+PAUSE MENU / INVENTORY
+----------------------
+- Press ESC when not trading to open the pause menu.
+- The pause menu shows all items in the player's inventory and a "Quit Game"
+  entry at the bottom.
+- Controls:
+  - UP/DOWN to change selection.
+  - ENTER to equip/use the selected item or to confirm quit.
+  - ESC to close the menu.
+- Equipping rules:
+  - Items with dmg > 0 equip as weapon.
+  - Items with armor > 0 equip as armor.
+  - Equipped items are suffix-labeled with [Equipped].
+
+HUD
+---
+- Top-left HUD displays:
+  - HP / Max HP
+  - Total Damage
+  - Total Armor
+  - Current attack delay (frames)
+  - Current money
+  - Current Area index
+- When the player is near a merchant and not in a menu, a hint appears:
+  "Press E to trade".
+- When the player is dead, a simple death message is shown with instructions
+  for exiting or restarting.
+
+AREA PROGRESSION
+----------------
+- When the player reaches the far right side of WORLD_WIDTH, the game
+  increments the Area index.
+- A new City instance is generated with:
+  - Increased difficulty factor.
+  - New background buildings.
+  - New platform and ladder layout.
+  - Newly generated enemies and one merchant.
+- Player position is reset near the left side for the next Area.
+
+FUTURE / OPEN MECHANICS
+-----------------------
+- Complete procedural ranged weapon generation in merchants/enemies using the
+  type-biased multipliers.
+- Implement ranged enemy types (bows, wands, staffs).
+- Improve enemy AI with patrol paths, line-of-sight logic, and better
+  platform navigation.
+- More item types (spears, greatswords, crossbows, magical foci).
+- Distinctive visuals per rarity tier (e.g., colored outlines or glows).
+- Visual coin drops with pickup animations and sounds.
+- More nuanced armor slots and separate stats for helmet, chest, and leggings.
