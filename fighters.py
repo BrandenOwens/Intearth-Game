@@ -1,150 +1,178 @@
-# fighters.py
-import pygame
-import math
+# fighters.py — player character
 
-GRAVITY = 0.6
-MOVE_SPEED = 3.5
-JUMP_VEL = -11
-MAX_FALL = 18
+import pygame
+from constants import (
+    MOVE_SPEED,
+    JUMP_SPEED,
+    GRAVITY,
+    MAX_FALL_SPEED,
+    PLAYER_COLOR,
+)
 
 
 class Fighter:
-    def __init__(self, x, y):
-        # Position & velocity
-        self.x = float(x)
-        self.y = float(y)
-        self.vx = 0
-        self.vy = 0
+    """
+    Simple tall silhouette made of rectangles, with basic platformer physics.
+    """
+
+    def __init__(self, x: int, y: int):
+        # logical position is the top-left of the hitbox
+        self.x = x
+        self.y = y
+
+        # hitbox size
+        self.width = 18
+        self.height = 60
+
+        self.vx = 0.0
+        self.vy = 0.0
         self.on_ground = False
 
-        # Animation
-        self.walk_phase = 0
-        self.is_moving = False
-        self.is_attacking = False
+        # for walk animation
+        self.walk_cycle = 0.0
+        self.facing = 1  # 1 right, -1 left
 
-        # Tall silhouette proportions
-        self.head_w, self.head_h = 10, 8
-        self.torso_w, self.torso_h = 14, 18
-        self.leg_w, self.leg_h = 4, 22
-        self.arm_w, self.arm_h = 4, 16
+    # ---------------- physics / update ----------------
 
-        self.width = self.torso_w + 6
-        self.height = self.head_h + self.torso_h + self.leg_h
-
-        # Debug colors
-        self.head_color = (255, 255, 0)
-        self.torso_color = (255, 255, 0)
-        self.left_arm_color = (0, 200, 255)
-        self.right_arm_color = (0, 255, 120)
-        self.left_leg_color = (255, 140, 0)
-        self.right_leg_color = (255, 0, 200)
-
-    # Collision rect
-    @property
-    def rect(self):
+    def rect(self) -> pygame.Rect:
         return pygame.Rect(int(self.x), int(self.y), self.width, self.height)
 
-    # ------------------------------------------------------------
-    # Main update entry point (called from main.py)
-    # ------------------------------------------------------------
-    def update_player(self, keys, platforms):
-        self.handle_input(keys)
-        self.apply_physics(platforms)
-        self.update_animation()
-
-    # ------------------------------------------------------------
-    # Input
-    # ------------------------------------------------------------
     def handle_input(self, keys):
         self.vx = 0
-        self.is_moving = False
-
         if keys[pygame.K_a]:
-            self.vx = -MOVE_SPEED
-            self.is_moving = True
+            self.vx -= MOVE_SPEED
+            self.facing = -1
         if keys[pygame.K_d]:
-            self.vx = MOVE_SPEED
-            self.is_moving = True
+            self.vx += MOVE_SPEED
+            self.facing = 1
 
-        # Jump
-        if self.on_ground and (keys[pygame.K_w] or keys[pygame.K_SPACE]):
-            self.vy = JUMP_VEL
+    def apply_gravity(self):
+        self.vy += GRAVITY
+        if self.vy > MAX_FALL_SPEED:
+            self.vy = MAX_FALL_SPEED
+
+    def jump(self):
+        if self.on_ground:
+            self.vy = JUMP_SPEED
             self.on_ground = False
 
-    # ------------------------------------------------------------
-    # Physics + collision
-    # ------------------------------------------------------------
-    def apply_physics(self, platforms):
-        # Gravity
-        self.vy += GRAVITY
-        if self.vy > MAX_FALL:
-            self.vy = MAX_FALL
+    def collide_axis(self, platforms, axis: str):
+        r = self.rect()
+        for p in platforms:
+            if r.colliderect(p.rect):
+                if axis == "x":
+                    if self.vx > 0:
+                        r.right = p.left
+                    elif self.vx < 0:
+                        r.left = p.right
+                    self.x = r.x
+                    self.vx = 0
+                else:
+                    if self.vy > 0:
+                        r.bottom = p.top
+                        self.on_ground = True
+                    elif self.vy < 0:
+                        r.top = p.bottom
+                    self.y = r.y
+                    self.vy = 0
+        return r
 
-        # Horizontal move
+    def update(self, keys, platforms):
+        self.handle_input(keys)
+        self.apply_gravity()
+
+        # x axis
         self.x += self.vx
-        r = self.rect
-        for p in platforms:
-            if r.colliderect(p.rect):
-                if self.vx > 0:   # hit left side of platform
-                    self.x = p.rect.left - self.width
-                elif self.vx < 0: # hit right side
-                    self.x = p.rect.right
-                r = self.rect
-
-        # Vertical move
-        self.y += self.vy
-        r = self.rect
         self.on_ground = False
+        self.collide_axis(platforms, "x")
 
-        for p in platforms:
-            if r.colliderect(p.rect):
-                if self.vy > 0:  # landing
-                    self.y = p.rect.top - self.height
-                    self.vy = 0
-                    self.on_ground = True
-                elif self.vy < 0:  # head hit
-                    self.y = p.rect.bottom
-                    self.vy = 0
-                r = self.rect
+        # y axis
+        self.y += self.vy
+        self.collide_axis(platforms, "y")
 
-    # ------------------------------------------------------------
-    # Animation updates
-    # ------------------------------------------------------------
-    def update_animation(self):
-        if self.is_moving and self.on_ground:
-            self.walk_phase += 0.3
+        # walk animation
+        if self.vx != 0 and self.on_ground:
+            self.walk_cycle += 0.25
         else:
-            self.walk_phase = 0
+            self.walk_cycle = 0.0
 
-    # ------------------------------------------------------------
-    # Draw player
-    # ------------------------------------------------------------
-    def draw(self, surf, cam_x):
-        px = int(self.x - cam_x)
-        py = int(self.y)
-        cx = px + self.width // 2
+    # ---------------- drawing ----------------
 
-        head_top = py
-        torso_top = head_top + self.head_h
-        leg_top = torso_top + self.torso_h
+    def draw(self, surface, camera_x: int):
+        # base rect (torso + legs)
+        r = self.rect().move(-camera_x, 0)
 
-        # Leg swing
-        swing = int(math.sin(self.walk_phase) * 4)
+        # body proportions
+        head_h = 12
+        torso_h = 24
+        leg_h = self.height - (head_h + torso_h)
+        arm_len = 20
+        arm_thick = 4
 
-        left_leg = pygame.Rect(cx - 6 - swing, leg_top, self.leg_w, self.leg_h)
-        right_leg = pygame.Rect(cx + 2 + swing, leg_top, self.leg_w, self.leg_h)
+        # walk swing
+        swing = int(4 * pygame.math.Vector2(1, 0).rotate(self.walk_cycle * 30).x)
 
-        torso = pygame.Rect(cx - self.torso_w // 2, torso_top, self.torso_w, self.torso_h)
-        head = pygame.Rect(cx - self.head_w // 2, head_top, self.head_w, self.head_h)
+        # head
+        head_rect = pygame.Rect(
+            r.x,
+            r.y,
+            r.width,
+            head_h,
+        )
 
-        # Arms swing opposite of legs
-        arm_y = torso_top + 4
-        left_arm = pygame.Rect(cx - self.torso_w // 2 - 4 - swing, arm_y, self.arm_w, self.arm_h)
-        right_arm = pygame.Rect(cx + self.torso_w // 2 + swing, arm_y, self.arm_w, self.arm_h)
+        # torso
+        torso_rect = pygame.Rect(
+            r.x,
+            r.y + head_h,
+            r.width,
+            torso_h,
+        )
 
-        pygame.draw.rect(surf, self.left_leg_color, left_leg)
-        pygame.draw.rect(surf, self.right_leg_color, right_leg)
-        pygame.draw.rect(surf, self.torso_color, torso)
-        pygame.draw.rect(surf, self.left_arm_color, left_arm)
-        pygame.draw.rect(surf, self.right_arm_color, right_arm)
-        pygame.draw.rect(surf, self.head_color, head)
+        # legs (two thin rectangles)
+        leg_width = 4
+        leg_y = r.y + head_h + torso_h
+        left_leg = pygame.Rect(
+            r.centerx - 6,
+            leg_y,
+            leg_width,
+            leg_h,
+        )
+        right_leg = pygame.Rect(
+            r.centerx + 2,
+            leg_y,
+            leg_width,
+            leg_h,
+        )
+
+        if self.vx != 0:
+            if self.facing > 0:
+                left_leg.y += swing
+                right_leg.y -= swing
+            else:
+                left_leg.y -= swing
+                right_leg.y += swing
+
+        # arms (simple rectangles that swing)
+        shoulder_y = r.y + head_h + 4
+        if self.facing > 0:
+            arm_dir = 1
+        else:
+            arm_dir = -1
+
+        arm_swing = swing
+        left_arm = pygame.Rect(
+            r.centerx - arm_dir * (r.width // 2 + 2),
+            shoulder_y + arm_swing,
+            arm_len,
+            arm_thick,
+        )
+        right_arm = pygame.Rect(
+            r.centerx + (arm_dir * (r.width // 2 - arm_len - 2)),
+            shoulder_y - arm_swing,
+            arm_len,
+            arm_thick,
+        )
+
+        # draw all pieces
+        for part in (head_rect, torso_rect, left_leg, right_leg, left_arm, right_arm):
+            pygame.draw.rect(surface, PLAYER_COLOR, part)
