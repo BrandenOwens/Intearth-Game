@@ -21,8 +21,10 @@ GROUND_COLOR = (55, 44, 40)
 UI_BG = (0, 0, 0, 180)
 
 PLAYER_COLOR = (255, 215, 0)
-ENEMY_COLOR = (255, 120, 40)
+ENEMY_COLOR = (255, 120, 40)  # Base color, enemies will have random variations
 MERCHANT_COLOR = (120, 200, 255)
+NPC_COLOR = (100, 150, 255)  # Blue for friendly NPCs
+DOG_COLOR = (139, 90, 43)  # Brown for dog
 SWORD_COLOR = (230, 230, 230)
 HITBOX_COLOR_DEBUG = (255, 0, 0, 120)
 
@@ -183,6 +185,133 @@ class Door:
         self.rect = pygame.Rect(x, y, 30, 40)
 
 
+class Quest:
+    """Represents a quest that the player can complete."""
+    def __init__(self, quest_type, npc, description, target_building=None, target_floor=None, dog=None, target_stage=None):
+        self.quest_type = quest_type  # "defeat_enemies", "find_dog", or "save_city"
+        self.npc = npc  # The NPC who gave the quest
+        self.description = description
+        self.status = "offered"  # "offered", "active", "completed", "failed"
+        self.target_building = target_building  # Building where quest takes place
+        self.target_floor = target_floor  # Floor where NPC/dog is
+        self.dog = dog  # Dog entity for find_dog quest
+        self.initial_enemy_count = 0  # For defeat_enemies quest
+        self.companion_npc = None  # NPC that follows player for defeat_enemies quest
+        self.target_stage = target_stage  # For save_city quest - which stage to clear
+        self.reward_money = 0  # Gold reward for completing quest
+
+
+class PickupNotification:
+    """Temporary notification for picked up items."""
+    def __init__(self, text):
+        self.text = text
+        self.timer = 180  # 3 seconds at 60 FPS
+        self.alpha = 255
+
+
+class Dog:
+    """Dog entity that follows the player."""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.w = 20
+        self.h = 20
+        self.vx = 0
+        self.vy = 0
+        self.follow_player = None  # Player to follow
+        self.follow_distance = 50  # Distance to maintain from player
+        self.speed = 3.0
+        self.on_ground = False
+        self.inside_building = None  # Which building the dog is in
+        self.building_floor_num = 0  # Which floor the dog is on
+        self.hit_flash = 0  # Flash timer when hit
+        self.hp = 50  # Dog has some HP
+        self.hp_max = 50
+        
+    @property
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y - self.h), self.w, self.h)
+    
+    def update(self, player, platforms, building_bounds=None):
+        """Update dog position to follow player."""
+        if not player or player.is_dead():
+            return
+        
+        # Calculate distance to player
+        dx = player.x - self.x
+        dy = player.y - self.y
+        dist = math.sqrt(dx*dx + dy*dy) if dx != 0 or dy != 0 else 0
+        
+        # Move towards player if too far
+        if dist > self.follow_distance:
+            if dist > 0:
+                self.vx = (dx / dist) * self.speed
+            else:
+                self.vx = 0
+        else:
+            self.vx *= 0.8  # Slow down when close
+        
+        # Apply gravity
+        self.vy += GRAVITY
+        if self.vy > 16:
+            self.vy = 16
+        
+        # Move
+        self.x += self.vx
+        self.y += self.vy
+        
+        # Collision with ground/platforms
+        if building_bounds:
+            building_x, building_y, building_width, floor_y, ceiling_y = building_bounds
+            if self.y >= floor_y:
+                self.y = floor_y
+                self.vy = 0
+                self.on_ground = True
+            else:
+                self.on_ground = False
+        
+        # Platform collision
+        feet = pygame.Rect(self.rect.left, self.rect.bottom - 5, self.rect.width, 10)
+        for p in platforms:
+            if feet.colliderect(p.rect) and self.vy >= 0:
+                self.y = p.rect.top
+                self.vy = 0
+                self.on_ground = True
+                break
+    
+    def draw(self, surface, camera_x, camera_y=0):
+        """Draw the dog."""
+        r = self.rect.move(-camera_x, -camera_y)
+        # Flash red if hit (temporary effect)
+        draw_color = DOG_COLOR if not hasattr(self, 'hit_flash') or self.hit_flash <= 0 else (255, 100, 100)
+        
+        # Simple dog shape - body
+        pygame.draw.ellipse(surface, draw_color, r)
+        # Head
+        head = pygame.Rect(r.centerx - 6, r.top - 8, 12, 12)
+        pygame.draw.ellipse(surface, draw_color, head)
+        # Ears (black)
+        pygame.draw.ellipse(surface, (0, 0, 0), (r.centerx - 8, r.top - 6, 6, 8))
+        pygame.draw.ellipse(surface, (0, 0, 0), (r.centerx + 2, r.top - 6, 6, 8))
+        # Eyes (black)
+        pygame.draw.circle(surface, (0, 0, 0), (r.centerx - 3, r.top - 4), 2)
+        pygame.draw.circle(surface, (0, 0, 0), (r.centerx + 3, r.top - 4), 2)
+        # Nose (black)
+        pygame.draw.circle(surface, (0, 0, 0), (r.centerx, r.top - 1), 3)
+        # Tail
+        tail_x = r.right - 5
+        tail_y = r.centery
+        pygame.draw.line(surface, draw_color, (r.right, tail_y), (tail_x, tail_y - 8), 3)
+        
+        # Draw "woof" text above dog
+        woof_text = FONT_SMALL.render("woof", True, (255, 255, 200))
+        text_rect = woof_text.get_rect(center=(r.centerx, r.top - 30))
+        # Background for text
+        bg_rect = pygame.Rect(text_rect.x - 5, text_rect.y - 2, text_rect.width + 10, text_rect.height + 4)
+        pygame.draw.rect(surface, (0, 0, 0, 180), bg_rect)
+        surface.blit(woof_text, text_rect)
+
+
 class Building:
     """A skyscraper with multiple floors that the player can enter."""
     def __init__(self, x, y, width, num_floors):
@@ -203,12 +332,17 @@ class Building:
             self.floors.append({
                 'floor_num': i,
                 'y': floor_y,
-                'enemies': [],  # Will be populated with Fighter objects
-                'containers': [],  # Lootable containers (chests, dressers, wardrobes)
-                'background_assets': [],  # Decorative items (chairs, plants, TVs)
-                'elevator_up_x': x + width - 60,  # Up elevator on right side
-                'elevator_down_x': x + width - 100,  # Down elevator next to up
-                'windows': []  # Window positions for background visibility
+                'enemies': [],  # Will be populated with Fighter objects (in apartments only)
+                'apartment_enemies': [],  # Enemies in the apartment room
+                'containers': [],  # Lootable containers (chests, dressers, wardrobes) - in apartments only
+                'background_assets': [],  # Decorative items (chairs, plants, TVs) - in halls
+                'apartment_assets': [],  # Furniture in apartment rooms (bed, dresser, etc.)
+                'elevator_up_x': x + width - 30,  # Up elevator on far right side
+                'elevator_down_x': x + 30,  # Down elevator on far left side
+                'elevator_exit_x': x + 60,  # Exit elevator (double down arrow) - spaced from down elevator
+                'apartment_door_x': x + width // 2,  # Apartment door in middle of floor
+                'windows': [],  # Window positions for background visibility
+                'has_apartment': True  # Each floor has an apartment
             })
         
         # Entry door (first floor, center) - bigger sliding glass door style, at ground level
@@ -315,10 +449,13 @@ class Projectile:
             if hit_target.was_merchant and not hit_target.merchant_hostile:
                 hit_target.become_hostile(self.owner)
 
-            # Knockback
-            if self.knockback != 0:
+            # Knockback - push target away from projectile direction
+            if self.knockback > 0:
+                # Use projectile velocity direction (same as attacker's facing direction)
                 direction = 1 if self.vx >= 0 else -1
-                hit_target.vx += self.knockback * direction
+                # Apply knockback with timer - reduced by 70% (30% of original)
+                hit_target.knockback_vx = self.knockback * direction * 2.4  # 30% of 8.0 = 2.4x multiplier
+                hit_target.knockback_timer = 20  # Knockback lasts 20 frames
 
             # Splash for staff-type projectiles
             if self.kind == "staff" and self.splash_radius > 0:
@@ -367,14 +504,26 @@ class Projectile:
 
 #VVVVVVVVVVVV FIGHTER CLASS AND COMBAT LOGIC VVVVVVVV
 class Fighter:
-    def __init__(self, x, y, color, is_player=False, is_merchant=False):
+    def __init__(self, x, y, color, is_player=False, is_merchant=False, is_boss=False):
         self.x = x
         self.y = y
-        self.w = 26
-        self.h = 70
+        # Boss units are bigger
+        if is_boss:
+            self.w = 35  # 35% bigger width
+            self.h = 90  # 28% bigger height
+        else:
+            self.w = 26
+            self.h = 70
         self.color = color
         self.is_player = is_player
         self.is_merchant = is_merchant
+        self.is_boss = is_boss
+        self.is_npc = False  # Friendly NPC
+        self.is_companion = False  # Companion NPC that follows player
+        self.follow_target = None  # Target to follow (for companions)
+        self.has_quest = False  # Whether NPC has a quest to offer
+        self.dialogue = ""  # Dialogue text for NPC
+        self.in_apartment = False  # Whether fighter is in apartment room
 
         self.vx = 0
         self.vy = 0
@@ -416,6 +565,10 @@ class Fighter:
         self.patrol_timer = random.randint(60, 240)
         self.was_merchant = is_merchant
         self.merchant_hostile = False
+        
+        # Knockback system
+        self.knockback_timer = 0  # Frames remaining of knockback
+        self.knockback_vx = 0  # Knockback velocity
         self.walk_anim_frame = 0
 
         # regen system
@@ -440,6 +593,12 @@ class Fighter:
         if self.armor_item:
             a += self.armor_item.armor
         return max(0, a)
+    
+    def total_knockback(self):
+        """Get total knockback value from weapon."""
+        if self.weapon:
+            return self.weapon.knockback if hasattr(self.weapon, 'knockback') else 0.0
+        return 0.0
 
     def attack_delay(self):
         bonus = 0.0
@@ -614,21 +773,36 @@ class Fighter:
         right = key_state[pygame.K_d]
         up = key_state[pygame.K_w]
         down = key_state[pygame.K_s]
-
-        if left:
-            self.vx = -self.speed
-            self.facing = -1
-        elif right:
-            self.vx = self.speed
-            self.facing = 1
+        
+        # Handle knockback first
+        if self.knockback_timer > 0:
+            self.knockback_timer -= 1
+            # Apply knockback velocity
+            self.vx = self.knockback_vx
+            # Reduce knockback over time (friction effect) - slower decay for testing
+            self.knockback_vx *= 0.92  # Slower decay (was 0.85)
+            if abs(self.knockback_vx) < 1.0:  # Higher threshold (was 0.5)
+                self.knockback_vx = 0
+                self.knockback_timer = 0
+            # Still allow jumping during knockback
+            if up and self.on_ground:
+                self.vy = self.jump_speed
+            self.facing = -1 if self.vx < 0 else 1
         else:
-            self.vx *= FRICTION
-            if abs(self.vx) < 0.2:
-                self.vx = 0
+            if left:
+                self.vx = -self.speed
+                self.facing = -1
+            elif right:
+                self.vx = self.speed
+                self.facing = 1
+            else:
+                self.vx *= FRICTION
+                if abs(self.vx) < 0.2:
+                    self.vx = 0
 
-        if up and self.on_ground:
-            self.vy = self.jump_speed
-            self.on_ground = False
+            if up and self.on_ground:
+                self.vy = self.jump_speed
+                self.on_ground = False
 
         self.apply_gravity()
         self.move_and_collide(platforms, building_bounds)
@@ -637,47 +811,70 @@ class Fighter:
     # ---------- ENEMY AI ----------
     def update_enemy_ai(self, player, platforms, building_bounds=None):
         if (self.is_merchant and not self.merchant_hostile) or self.is_dead():
-            self.vx = 0
+            # Still handle knockback even if merchant/dead
+            if self.knockback_timer > 0:
+                self.knockback_timer -= 1
+                self.vx = self.knockback_vx
+                self.knockback_vx *= 0.85
+                if abs(self.knockback_vx) < 0.5:
+                    self.knockback_vx = 0
+                    self.knockback_timer = 0
+            else:
+                self.vx = 0
             self.update_attack_state()
             self.apply_gravity()
             self.move_and_collide(platforms, building_bounds)
             return
 
+        # Calculate distance first (needed for both knockback and normal AI)
         aggro_range = 260
         aggro_drop_range = 360
-
         dx = player.x - self.x
         dist = abs(dx)
-
-        if not self.aggro and dist <= aggro_range:
-            self.aggro = True
-        elif self.aggro and dist >= aggro_drop_range:
-            self.aggro = False
-
-        if self.aggro:
-            self.facing = 1 if dx > 0 else -1
-
-        if dist > 60:
-            self.vx = self.speed * self.facing
+        
+        # Handle knockback first - it overrides normal AI movement
+        if self.knockback_timer > 0:
+            self.knockback_timer -= 1
+            self.vx = self.knockback_vx
+            self.knockback_vx *= 0.92  # Slower decay for testing (was 0.85)
+            if abs(self.knockback_vx) < 1.0:  # Higher threshold (was 0.5)
+                self.knockback_vx = 0
+                self.knockback_timer = 0
+            self.facing = -1 if self.vx < 0 else 1
         else:
-            self.vx = 0
+            # Normal AI movement
+            if not self.aggro and dist <= aggro_range:
+                self.aggro = True
+            elif self.aggro and dist >= aggro_drop_range:
+                self.aggro = False
+
+            if self.aggro:
+                self.facing = 1 if dx > 0 else -1
+
+            if dist > 60:
+                self.vx = self.speed * self.facing
+            else:
+                self.vx = 0
 
         if player.y < self.y - 30 and self.on_ground and random.random() < 0.02:
             self.vy = self.jump_speed
-        else:
+        
+        # Only do patrol if not in knockback
+        if self.knockback_timer <= 0:
             # Patrol: pace left/right until re-aggro.
-            self.vx = self.speed * self.patrol_dir
-            self.patrol_timer -= 1
+            if not self.aggro:
+                self.vx = self.speed * self.patrol_dir
+                self.patrol_timer -= 1
 
-            hit_left_edge = self.x <= 20
-            hit_right_edge = self.x + self.w >= WORLD_WIDTH - 20
-            if hit_left_edge or hit_right_edge:
-                self.patrol_dir *= -1
-                self.patrol_timer = random.randint(60, 200)
+                hit_left_edge = self.x <= 20
+                hit_right_edge = self.x + self.w >= WORLD_WIDTH - 20
+                if hit_left_edge or hit_right_edge:
+                    self.patrol_dir *= -1
+                    self.patrol_timer = random.randint(60, 200)
 
-            if self.patrol_timer <= 0 or random.random() < 0.01:
-                self.patrol_dir *= -1
-                self.patrol_timer = random.randint(60, 200)
+                if self.patrol_timer <= 0 or random.random() < 0.01:
+                    self.patrol_dir *= -1
+                    self.patrol_timer = random.randint(60, 200)
 
             self.facing = self.patrol_dir
 
@@ -702,6 +899,31 @@ class Fighter:
     def draw(self, surface, camera_x, camera_y=0, debug=False):
         r = self.rect.move(-camera_x, -camera_y)
 
+        # Red glow/aura when health is low (30% or less) - for players only
+        if self.is_player and not self.is_dead():
+            health_percent = self.hp / self.hp_max if self.hp_max > 0 else 0
+            if health_percent <= 0.3:
+                # Create pulsing glow effect - more intense as HP gets lower
+                low_health_threshold = 0.3
+                intensity = int((low_health_threshold - health_percent) / low_health_threshold * 150)  # 0-150
+                glow_radius = 35 + intensity // 8  # Radius grows as health decreases
+                
+                # Create glow surface with alpha channel
+                glow_size = glow_radius * 2
+                glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+                
+                # Draw multiple circles for smooth glow effect
+                for radius in range(glow_radius, 0, -2):
+                    # Alpha decreases from center outward
+                    alpha = max(20, min(120, intensity - (glow_radius - radius) * 2))
+                    glow_color = (255, 0, 0, alpha)  # Red with transparency
+                    pygame.draw.circle(glow_surf, glow_color, (glow_radius, glow_radius), radius)
+                
+                # Draw glow centered on player (below player sprite)
+                glow_x = r.centerx - glow_radius
+                glow_y = r.centery - glow_radius
+                surface.blit(glow_surf, (glow_x, glow_y))
+
         # Walking animation state
         is_moving = abs(self.vx) > 0.1 and self.on_ground and not self.climbing
         if is_moving:
@@ -710,9 +932,15 @@ class Fighter:
         walk_swing = math.sin(walk_phase * math.pi / 20) * 0.5
 
         # Torso: trapezoid (wider at top, narrower at bottom) - shortened
-        torso_top_width = 18
-        torso_bottom_width = 12
-        torso_height = r.height - 28  # Shortened more
+        # Boss units have larger torso
+        if self.is_boss:
+            torso_top_width = 24
+            torso_bottom_width = 16
+            torso_height = r.height - 36
+        else:
+            torso_top_width = 18
+            torso_bottom_width = 12
+            torso_height = r.height - 28  # Shortened more
         torso_top_y = r.bottom - torso_height
         torso_bottom_y = r.bottom - 2
 
@@ -724,8 +952,33 @@ class Fighter:
         ]
         pygame.draw.polygon(surface, self.color, torso_points)
 
-        head = pygame.Rect(r.centerx - 6, torso_top_y - 12, 12, 12)
-        pygame.draw.rect(surface, self.color, head, border_radius=3)
+        # Boss units have larger head
+        if self.is_boss:
+            head_size = 15
+            head = pygame.Rect(r.centerx - head_size // 2, torso_top_y - 15, head_size, head_size)
+            pygame.draw.rect(surface, self.color, head, border_radius=4)
+            
+            # Draw horns on boss units (larger)
+            horn_left_x = r.centerx - 7
+            horn_left_y = torso_top_y - 15
+            pygame.draw.polygon(surface, (60, 60, 60), [
+                (horn_left_x - 2, horn_left_y - 2),
+                (horn_left_x + 2, horn_left_y - 8),
+                (horn_left_x + 5, horn_left_y - 5),
+                (horn_left_x, horn_left_y)
+            ])
+            # Right horn
+            horn_right_x = r.centerx + 7
+            horn_right_y = torso_top_y - 15
+            pygame.draw.polygon(surface, (60, 60, 60), [
+                (horn_right_x + 2, horn_right_y - 2),
+                (horn_right_x - 2, horn_right_y - 8),
+                (horn_right_x - 5, horn_right_y - 5),
+                (horn_right_x, horn_right_y)
+            ])
+        else:
+            head = pygame.Rect(r.centerx - 6, torso_top_y - 12, 12, 12)
+            pygame.draw.rect(surface, self.color, head, border_radius=3)
 
         accent = tuple(max(0, c - 30) for c in self.color)
         highlight = tuple(min(255, c + 40) for c in self.color)
@@ -1015,11 +1268,15 @@ class City:
         self.units = []
         self.player_inside_building = None  # Which building player is in
         self.player_current_floor = 0  # Current floor when inside
+        self.player_in_apartment = False  # Whether player is in apartment room (not hall)
         self.bg_buildings_back = []
         self.bg_buildings_front = []
         self.bg_buildings_detailed = []  # Stores building data with windows
         self.hillside_buildings = []  # Hillside cityscape layer
         self.streetlights = []  # Streetlight positions
+        self.quests = []  # Active quests
+        self.pickup_notifications = []  # Pickup notification messages
+        self.dogs = []  # Dog entities
         self.generate()
 
     def generate_window_pattern(self, building_rect, window_colors, pattern_type=None):
@@ -1264,10 +1521,15 @@ class City:
 
         # Generate skyscrapers
         x = 100
-        while x < WORLD_WIDTH - 300:
-            # Building dimensions
-            building_width = 520  # Wide enough for 20 people (26px each)
+        EXIT_BUFFER = 250  # Keep buildings away from the exit area
+        while x < WORLD_WIDTH - EXIT_BUFFER:
+            # Building dimensions - randomize width
+            building_width = random.randint(400, 700)  # Vary building widths
             num_floors = random.randint(5, 20)
+            
+            # Check if this building would extend into exit area
+            if x + building_width >= WORLD_WIDTH - EXIT_BUFFER:
+                break  # Stop generating if this building would be too close to exit
             
             building = Building(x, GROUND_Y, building_width, num_floors)
             self.buildings.append(building)
@@ -1275,16 +1537,28 @@ class City:
             # Populate floors with enemies and items
             settings = STAGE_SETTINGS.get(self.stage, STAGE_SETTINGS[4])
             for floor in building.floors:
-                # Some floors have enemies
+                # Enemies only spawn in apartments (not halls)
+                # Some floors have enemies in their apartments
                 if random.random() < 0.4:  # 40% chance per floor
                     num_enemies = random.randint(1, 3)
                     for _ in range(num_enemies):
-                        enemy_x = building.x + random.randint(50, building.width - 50)
+                        # Enemies spawn in apartment room (to the right of apartment door)
+                        apartment_room_x = floor['apartment_door_x'] + 50  # Inside apartment
+                        enemy_x = apartment_room_x + random.randint(0, 150)  # Random position in apartment
                         # Spawn enemy on the floor (floor['y'] is the floor level, Fighter y is bottom)
-                        enemy = Fighter(enemy_x, floor['y'], ENEMY_COLOR, is_player=False)
-                        # Mark enemy as inside this building
+                        # Random enemy color variation
+                        base_r, base_g, base_b = ENEMY_COLOR
+                        color_variation = random.randint(-40, 40)
+                        enemy_color = (
+                            max(100, min(255, base_r + color_variation)),
+                            max(80, min(200, base_g + color_variation // 2)),
+                            max(0, min(100, base_b + color_variation // 3))
+                        )
+                        enemy = Fighter(enemy_x, floor['y'], enemy_color, is_player=False)
+                        # Mark enemy as inside this building and in apartment
                         enemy.inside_building = building
                         enemy.building_floor_num = floor['floor_num']
+                        enemy.in_apartment = True  # Enemy is in apartment room
                         # Set enemy on ground immediately
                         enemy.on_ground = True
                         enemy.vy = 0
@@ -1298,14 +1572,25 @@ class City:
                         enemy.inventory.append(weapon)
                         enemy.inventory.append(armor_item)
                         enemy.money = random.randint(5, 40)
-                        floor['enemies'].append(enemy)
+                        floor['apartment_enemies'].append(enemy)
                         self.units.append(enemy)
                 
-                # Some floors have lootable containers
+                # Elevator door positions - avoid placing items on them (increased buffer)
+                ELEVATOR_WIDTH = 60  # Increased buffer zone around elevators
+                elevator_down_left = floor['elevator_down_x'] - ELEVATOR_WIDTH // 2
+                elevator_down_right = floor['elevator_down_x'] + ELEVATOR_WIDTH // 2
+                elevator_up_left = floor['elevator_up_x'] - ELEVATOR_WIDTH // 2
+                elevator_up_right = floor['elevator_up_x'] + ELEVATOR_WIDTH // 2
+                
+                # Containers only spawn in apartments (not halls)
+                # Some apartment rooms have lootable containers
                 if random.random() < 0.4:  # 40% chance per floor
-                    num_containers = random.randint(1, 3)
+                    num_containers = random.randint(1, 2)
                     for _ in range(num_containers):
-                        container_x = building.x + random.randint(60, building.width - 100)
+                        # Containers spawn in apartment room
+                        apartment_room_x = floor['apartment_door_x'] + 50
+                        container_x = apartment_room_x + random.randint(20, 150)
+                        
                         container_type = random.choice(['chest', 'dresser', 'wardrobe'])
                         # Container may or may not have an item
                         container_item = None
@@ -1325,21 +1610,97 @@ class City:
                             'looted': False
                         })
                 
-                # Add background assets (decorative items)
-                num_assets = random.randint(2, 5)
-                for _ in range(num_assets):
-                    asset_x = building.x + random.randint(40, building.width - 60)
-                    asset_type = random.choice(['chair', 'plant', 'tv'])
-                    # TVs hang on walls, others sit on floor
-                    if asset_type == 'tv':
-                        # TV hangs on back wall - middle of wall height
-                        asset_y = floor['y'] - building.floor_height // 2  # Middle of wall
-                    else:
-                        asset_y = floor['y']  # Sit on floor
-                    floor['background_assets'].append({
+                # Add background assets for HALLS only (no cabinets)
+                # Halls only have: vending machines, fire extinguishers, security cameras, emergency signs
+                num_hall_assets = random.randint(2, 4)
+                hall_asset_types_wall = [
+                    'fire_extinguisher', 'security_camera', 'emergency_exit_sign'
+                ]
+                hall_asset_types_floor = [
+                    'vending_machine'
+                ]
+                
+                # Add apartment furniture (bed, dresser, nightstand, lamp)
+                apartment_furniture_types = ['bed_single', 'bed_double', 'dresser', 'refrigerator', 'television']
+                num_furniture = random.randint(3, 5)
+                
+                # Place hall assets (vending machines, fire extinguishers, etc.) - in halls only
+                existing_hall_positions = []
+                vending_machine_count = 0  # Track vending machines - max 1 per floor
+                for _ in range(num_hall_assets):
+                    max_attempts = 30
+                    asset_x = None
+                    asset_y = None
+                    asset_type = None
+                    
+                    for attempt in range(max_attempts):
+                        # Randomly choose wall or floor mounted (but no vending machine if already have one)
+                        if random.random() < 0.5:  # 50% chance wall mounted
+                            asset_type = random.choice(hall_asset_types_wall)
+                            test_x = building.x + random.randint(60, building.width - 60)
+                            test_y = floor['y'] - building.floor_height // 2  # Middle of wall
+                        else:
+                            # Only add vending machine if we don't have one yet
+                            if vending_machine_count >= 1:
+                                asset_type = random.choice(hall_asset_types_wall)  # Fall back to wall mounted
+                                test_x = building.x + random.randint(60, building.width - 60)
+                                test_y = floor['y'] - building.floor_height // 2
+                            else:
+                                asset_type = random.choice(hall_asset_types_floor)
+                                test_x = building.x + random.randint(60, building.width - 60)
+                                test_y = floor['y']  # On floor
+                        
+                        # Check if not on elevator doors (with increased buffer)
+                        if (elevator_down_left <= test_x <= elevator_down_right or
+                                elevator_up_left <= test_x <= elevator_up_right):
+                            continue
+                        
+                        # Check if not overlapping with existing assets
+                        overlap = False
+                        for existing in existing_hall_positions:
+                            spacing_needed = 60 if asset_type == 'vending_machine' else 50  # More space for vending machines
+                            if abs(existing['x'] - test_x) < spacing_needed:
+                                overlap = True
+                                break
+                        
+                        if not overlap:
+                            asset_x = test_x
+                            asset_y = test_y
+                            break
+                    
+                    if asset_x is None:
+                        continue
+                    
+                    # Skip if trying to add vending machine but already have one
+                    if asset_type == 'vending_machine' and vending_machine_count >= 1:
+                        continue
+                    
+                    # Add to hall assets
+                    asset_data = {
                         'type': asset_type,
                         'x': asset_x,
                         'y': asset_y
+                    }
+                    # Vending machines sometimes have healing potions
+                    if asset_type == 'vending_machine':
+                        vending_machine_count += 1
+                        if random.random() < 0.3:
+                            asset_data['has_potion'] = True
+                    floor['background_assets'].append(asset_data)
+                    existing_hall_positions.append({'x': asset_x, 'y': asset_y})
+                
+                # Place apartment furniture (bed, dresser, nightstand, lamp) - in apartment room
+                apartment_room_x = floor['apartment_door_x'] + 50
+                for _ in range(num_furniture):
+                    furniture_type = random.choice(apartment_furniture_types)
+                    # Place furniture in apartment room (to the right of door)
+                    furniture_x = apartment_room_x + random.randint(20, 150)
+                    furniture_y = floor['y']
+                    
+                    floor['apartment_assets'].append({
+                        'type': furniture_type,
+                        'x': furniture_x,
+                        'y': furniture_y
                     })
             
             x += building_width + random.randint(100, 200)
@@ -1352,8 +1713,17 @@ class City:
 
         dmg = random.randint(dmg_min, dmg_max)
         knockback = round(random.uniform(kb_min, kb_max), 1)
-        atk_speed_bonus = random.uniform(0.0, 0.3)
         name = random.choice(MELEE_WEAPON_NAMES)
+
+        # Set attack speed bonus based on weapon type
+        if name == "Short Sword":
+            atk_speed_bonus = random.uniform(0.25, 0.45)  # Fast attack speed
+        elif name == "Long Sword":
+            atk_speed_bonus = random.uniform(-0.05, 0.05)  # Slower attack speed
+        else:  # Battle Axe
+            atk_speed_bonus = random.uniform(-0.15, 0.0)  # Slowest attack speed
+            # Increase knockback SIGNIFICANTLY for Battle Axes (debug)
+            knockback = round(random.uniform(kb_min * 5.0, kb_max * 5.0), 1)  # 5x knockback for testing
 
         visual_map = {
             "Short Sword": "shortsword",
@@ -1397,6 +1767,33 @@ class City:
             price=price,
         )
 
+    def generate_potion_for_stage(self, stage_settings):
+        # Fixed healing amounts based on stage
+        if self.stage == 1:
+            potion_name = "Small Potion"
+            heal_amount = 20
+        elif self.stage == 2:
+            potion_name = "Medium Potion"
+            heal_amount = 40
+        else:  # Stage 3+
+            potion_name = "Large Potion"
+            heal_amount = 80
+        
+        # Price based on heal amount
+        price = heal_amount * 2 + 5
+        
+        return Item(
+            name=potion_name,
+            dmg=0,
+            armor=0,
+            atk_speed_bonus=0.0,
+            knockback=0.0,
+            price=price,
+            heal_amount=heal_amount,
+            is_potion=True,
+            count=1,
+        )
+
     def generate_units(self, player):
         # Units are now generated inside buildings during building generation
         # Just spawn one merchant on the ground
@@ -1426,18 +1823,418 @@ class City:
         
         self.empower_merchant(merchant)
         self.units.append(merchant)
+        
+        # Generate one boss unit per game - spawn in a random building room
+        boss_settings = STAGE_SETTINGS.get(2, STAGE_SETTINGS[2])  # Stage 2 quality items
+        
+        # Find a random building and floor for the boss
+        if self.buildings:
+            # Pick a random building
+            boss_building = random.choice(self.buildings)
+            # Pick a random floor (not ground floor, make it more interesting)
+            available_floors = [f for f in boss_building.floors if f['floor_num'] > 0]  # Skip ground floor
+            if not available_floors:
+                available_floors = boss_building.floors  # Fallback to all floors if only 1 floor
+            
+            boss_floor = random.choice(available_floors)
+            boss_x = boss_building.x + random.randint(50, boss_building.width - 50)
+            
+            # Spawn boss on the selected floor
+            # Random boss color variation
+            base_r, base_g, base_b = ENEMY_COLOR
+            color_variation = random.randint(-40, 40)
+            boss_color = (
+                max(100, min(255, base_r + color_variation)),
+                max(80, min(200, base_g + color_variation // 2)),
+                max(0, min(100, base_b + color_variation // 3))
+            )
+            boss = Fighter(boss_x, boss_floor['y'], boss_color, is_player=False, is_boss=True)
+            # Mark boss as inside this building
+            boss.inside_building = boss_building
+            boss.building_floor_num = boss_floor['floor_num']
+            boss.on_ground = True
+            boss.vy = 0
+            
+            # Add boss to the floor's apartment enemies list
+            boss_floor['apartment_enemies'].append(boss)
+            boss.in_apartment = True  # Boss is in apartment
+        else:
+            # Fallback: spawn on ground if no buildings (shouldn't happen)
+            boss_x = random.randint(300, WORLD_WIDTH - 300)
+            # Random boss color variation (fallback)
+            base_r, base_g, base_b = ENEMY_COLOR
+            color_variation = random.randint(-40, 40)
+            boss_color = (
+                max(100, min(255, base_r + color_variation)),
+                max(80, min(200, base_g + color_variation // 2)),
+                max(0, min(100, base_b + color_variation // 3))
+            )
+            boss = Fighter(boss_x, GROUND_Y, boss_color, is_player=False, is_boss=True)
+        
+        # Boss has stage 2 quality items
+        boss_weapon = self.generate_weapon_for_stage(boss_settings)
+        boss_armor = self.generate_armor_for_stage(boss_settings)
+        boss.weapon = boss_weapon
+        boss.armor_item = boss_armor
+        boss.inventory.append(boss_weapon)
+        boss.inventory.append(boss_armor)
+        # Boss always drops an item when killed
+        boss.always_drops_item = True
+        boss.drop_item = random.choice([boss_weapon, boss_armor])  # Drop one of the items
+        
+        # Boss is tougher - 2x HP, more damage, more armor
+        boss.hp_max = int(settings["enemy_hp"] * 2.5)
+        boss.hp = boss.hp_max
+        boss.base_dmg = int(boss.base_dmg * 1.5)
+        boss.base_armor = int(boss.base_armor * 2)
+        boss.base_attack_delay = int(boss.base_attack_delay * settings["enemy_attack_delay_mult"] * 0.8)  # Faster attacks
+        boss.money = random.randint(100, 200)  # More money than regular enemies
+        
+        self.units.append(boss)
+        
+        # Generate starter NPC for stage 1
+        if self.stage == 1:
+            self.generate_starter_npc()
+        
+        # Generate NPCs with quests
+        self.generate_quest_npcs()
+
+    def generate_quest_npcs(self):
+        """Generate NPCs with quests in buildings."""
+        if not self.buildings:
+            return
+        
+        # Generate 1-2 quest NPCs per stage
+        num_quests = random.randint(1, 2)
+        
+        for _ in range(num_quests):
+            quest_type = random.choice(["defeat_enemies", "find_dog"])
+            
+            if quest_type == "defeat_enemies":
+                # Find a building with enemies
+                target_building = None
+                for building in self.buildings:
+                    total_enemies = sum(len(f['enemies']) for f in building.floors)
+                    if total_enemies >= 3:  # Need at least 3 enemies
+                        target_building = building
+                        break
+                
+                if not target_building:
+                    continue  # Skip if no suitable building
+                
+                # Pick a floor with enemies (in apartments)
+                floors_with_enemies = [f for f in target_building.floors if len(f.get('apartment_enemies', [])) >= 2]
+                if not floors_with_enemies:
+                    continue
+                
+                target_floor = random.choice(floors_with_enemies)
+                npc_x = target_building.x + random.randint(50, target_building.width - 50)
+                npc_y = target_floor['y']
+                
+                # Create NPC
+                npc = Fighter(npc_x, npc_y, NPC_COLOR, is_player=False, is_merchant=False)
+                npc.inside_building = target_building
+                npc.building_floor_num = target_floor['floor_num']
+                npc.on_ground = True
+                npc.vy = 0
+                npc.is_npc = True  # Mark as NPC
+                npc.hp_max = 80  # NPCs have moderate HP
+                npc.hp = npc.hp_max
+                
+                # Create companion NPC for following player
+                companion = Fighter(npc_x + 20, npc_y, NPC_COLOR, is_player=False, is_merchant=False)
+                companion.inside_building = target_building
+                companion.building_floor_num = target_floor['floor_num']
+                companion.on_ground = True
+                companion.vy = 0
+                companion.is_npc = True
+                companion.is_companion = True  # Mark as companion
+                companion.hp_max = 80
+                companion.hp = companion.hp_max
+                companion.follow_target = None  # Will be set to player when quest starts
+                
+                # Count initial enemies in building (apartment enemies)
+                initial_enemy_count = sum(len(f.get('apartment_enemies', [])) for f in target_building.floors)
+                
+                # Create quest
+                quest = Quest(
+                    quest_type="defeat_enemies",
+                    npc=npc,
+                    description="Help me! Defeat the enemies nearby!",
+                    target_building=target_building,
+                    target_floor=target_floor
+                )
+                quest.status = "offered"  # Quest starts as offered
+                quest.companion_npc = companion
+                quest.initial_enemy_count = initial_enemy_count
+                npc.has_quest = True
+                npc.dialogue = "Help me! Defeat the enemies nearby!"
+                
+                self.quests.append(quest)
+                self.units.append(npc)
+                self.units.append(companion)
+                
+            elif quest_type == "find_dog":
+                # Find a building for the NPC
+                target_building = random.choice(self.buildings)
+                target_floor = random.choice(target_building.floors)
+                npc_x = target_building.x + random.randint(50, target_building.width - 50)
+                npc_y = target_floor['y']
+                
+                # Create NPC
+                npc = Fighter(npc_x, npc_y, NPC_COLOR, is_player=False, is_merchant=False)
+                npc.inside_building = target_building
+                npc.building_floor_num = target_floor['floor_num']
+                npc.on_ground = True
+                npc.vy = 0
+                npc.is_npc = True
+                npc.hp_max = 50  # NPCs are not fighters
+                npc.hp = npc.hp_max
+                
+                # Find a different location for the dog (different floor or building)
+                dog_building = random.choice(self.buildings)
+                dog_floor = random.choice(dog_building.floors)
+                dog_x = dog_building.x + random.randint(50, dog_building.width - 50)
+                dog_y = dog_floor['y']
+                
+                # Create dog
+                dog = Dog(dog_x, dog_y)
+                dog.inside_building = dog_building
+                dog.building_floor_num = dog_floor['floor_num']
+                
+                # Create quest
+                quest = Quest(
+                    quest_type="find_dog",
+                    npc=npc,
+                    description="Help me find my dog",
+                    target_building=target_building,
+                    target_floor=target_floor,
+                    dog=dog
+                )
+                
+                self.quests.append(quest)
+                self.units.append(npc)
+                self.dogs.append(dog)
+    
+    def generate_starter_npc(self):
+        """Generate starter NPC at the beginning of stage 1."""
+        # Place NPC near the start of the map
+        starter_x = 150
+        starter_y = GROUND_Y
+        
+        starter_npc = Fighter(starter_x, starter_y, NPC_COLOR, is_player=False, is_merchant=False)
+        starter_npc.is_npc = True
+        starter_npc.hp_max = 50
+        starter_npc.hp = starter_npc.hp_max
+        starter_npc.has_quest = True
+        starter_npc.dialogue = "Help! Our neighborhood has been overrun with bandits!"
+        
+        # Create "save our city" quest (offered, not active)
+        quest = Quest(
+            quest_type="save_city",
+            npc=starter_npc,
+            description="Help! Our neighborhood has been overrun with bandits!",
+            target_stage=1
+        )
+        quest.status = "offered"  # Quest starts as offered, not active
+        
+        self.quests.append(quest)
+        self.units.append(starter_npc)
+    
+    def check_nearby_npc(self, player):
+        """Check if player is near an NPC. Returns NPC and quest if available."""
+        for unit in self.units:
+            if unit.is_npc and not unit.is_dead() and getattr(unit, 'has_quest', False):
+                # Check distance to NPC
+                dx = unit.x - player.x
+                dy = unit.y - player.y
+                dist_sq = dx*dx + dy*dy
+                if dist_sq < 2500:  # Within 50 pixels
+                    # Find quest for this NPC
+                    for quest in self.quests:
+                        if quest.npc == unit and quest.status == "offered":
+                            return unit, quest
+        return None, None
+    
+    def accept_quest(self, quest):
+        """Accept a quest - change status from offered to active."""
+        if quest.status == "offered":
+            quest.status = "active"
+            self.pickup_notifications.append(PickupNotification(f"Quest Accepted: {quest.description}"))
+    
+    def check_nearby_completed_quest_npc(self, player):
+        """Check if player is near an NPC with a completed quest. Returns NPC and quest if available."""
+        for unit in self.units:
+            if unit.is_npc and not unit.is_dead() and getattr(unit, 'has_quest', False):
+                # Check distance to NPC
+                dx = unit.x - player.x
+                dy = unit.y - player.y
+                dist_sq = dx*dx + dy*dy
+                if dist_sq < 2500:  # Within 50 pixels
+                    # Find completed quest for this NPC
+                    for quest in self.quests:
+                        if quest.npc == unit and quest.status == "completed":
+                            return unit, quest
+        return None, None
+    
+    def claim_quest_reward(self, quest, player):
+        """Claim quest reward from NPC - give gold and remove quest."""
+        if quest.status == "completed":
+            reward = getattr(quest, 'reward_money', 0) or 0
+            player.money += reward
+            self.pickup_notifications.append(PickupNotification(f"Quest Reward: {reward} gold!"))
+            # Remove quest from active list
+            if quest in self.quests:
+                self.quests.remove(quest)
+
+    def update_quests(self, player):
+        """Update quest status and handle quest logic."""
+        for quest in self.quests[:]:
+            if quest.status != "active":
+                continue
+            
+            if quest.quest_type == "defeat_enemies":
+                # Check if companion NPC died
+                if quest.companion_npc and quest.companion_npc.is_dead():
+                    quest.status = "failed"
+                    self.pickup_notifications.append(PickupNotification("Quest Failed: Companion died!"))
+                    continue
+                
+                # Check if player left building - companion should stop following
+                if self.player_inside_building != quest.target_building:
+                    if quest.companion_npc:
+                        quest.companion_npc.follow_target = None
+                
+                # Count remaining enemies in building (apartment enemies only)
+                current_enemy_count = sum(len(f.get('apartment_enemies', [])) for f in quest.target_building.floors)
+                # Filter out NPCs from enemy count
+                for floor in quest.target_building.floors:
+                    for enemy in floor.get('apartment_enemies', []):
+                        if enemy.is_npc:
+                            current_enemy_count -= 1
+                
+                # Quest complete if all enemies defeated
+                if current_enemy_count == 0 and quest.status == "active":
+                    quest.status = "completed"
+                    self.pickup_notifications.append(PickupNotification("Quest Complete! Return to quest giver for reward."))
+                    # Set reward
+                    quest.reward_money = random.randint(50, 150)
+                    # Companion NPC stops following
+                    if quest.companion_npc:
+                        quest.companion_npc.follow_target = None
+            
+            elif quest.quest_type == "find_dog":
+                # Check if dog is near merchant and player is near merchant (dog was sold)
+                if quest.dog:
+                    for merchant in self.units:
+                        if merchant.is_merchant and not merchant.is_dead():
+                            merchant_rect = merchant.rect
+                            dog_rect = quest.dog.rect
+                            player_rect = player.rect
+                            # Check if dog and player are both near merchant (within 50 pixels)
+                            dog_dx = merchant_rect.centerx - dog_rect.centerx
+                            dog_dy = merchant_rect.centery - dog_rect.centery
+                            dog_dist_sq = dog_dx*dog_dx + dog_dy*dog_dy
+                            player_dx = merchant_rect.centerx - player_rect.centerx
+                            player_dy = merchant_rect.centery - player_rect.centery
+                            player_dist_sq = player_dx*player_dx + player_dy*player_dy
+                            if dog_dist_sq < 2500 and player_dist_sq < 2500:  # Both within 50 pixels
+                                # Dog is near merchant with player - consider it sold
+                                quest.status = "failed"
+                                self.pickup_notifications.append(PickupNotification("Quest Failed: Dog was sold!"))
+                                if quest.dog in self.dogs:
+                                    self.dogs.remove(quest.dog)
+                                quest.dog = None
+                                break
+                
+                # Check if dog reached NPC
+                if quest.dog and quest.npc:
+                    dog_rect = quest.dog.rect
+                    npc_rect = quest.npc.rect
+                    if dog_rect.colliderect(npc_rect):
+                        # Dog found NPC - quest complete
+                        quest.status = "completed"
+                        self.pickup_notifications.append(PickupNotification("Quest Completed: Dog returned!"))
+                        # Remove dog from game
+                        if quest.dog in self.dogs:
+                            self.dogs.remove(quest.dog)
+                        quest.dog = None
+                        # Set reward
+                        quest.reward_money = random.randint(50, 150)
+            
+            elif quest.quest_type == "save_city":
+                # Check if all enemies in target stage are defeated
+                if self.stage == quest.target_stage:
+                    # Count all enemies in stage buildings (apartment enemies only)
+                    total_enemies = 0
+                    for building in self.buildings:
+                        for floor in building.floors:
+                            for enemy in floor.get('apartment_enemies', []):
+                                if not enemy.is_npc and not enemy.is_dead():
+                                    total_enemies += 1
+                    
+                    if total_enemies == 0 and quest.status == "active":
+                        quest.status = "completed"
+                        self.pickup_notifications.append(PickupNotification("Quest Complete! Return to quest giver for reward."))
+                        # Set reward
+                        quest.reward_money = random.randint(100, 200)
+    
+    def update_companion_npc(self, companion, player, building, floor_num):
+        """Update companion NPC to follow player and fight enemies."""
+        if companion.is_dead():
+            return
+        
+        # Only follow if player is in the same building
+        if building and companion.inside_building == building:
+            companion.follow_target = player
+            companion.building_floor_num = floor_num
+            
+            # Move towards player
+            dx = player.x - companion.x
+            dist = abs(dx)
+            
+            if dist > 50:  # Follow distance
+                companion.vx = 4.0 if dx > 0 else -4.0
+                companion.facing = 1 if dx > 0 else -1
+            else:
+                companion.vx = 0
+            
+            # Attack nearby enemies (in apartments)
+            if building:
+                floor = building.floors[floor_num]
+                for enemy in floor.get('apartment_enemies', []):
+                    if enemy.is_dead() or enemy.is_npc:
+                        continue
+                    enemy_dx = enemy.x - companion.x
+                    enemy_dist = abs(enemy_dx)
+                    if enemy_dist < 80:  # Attack range
+                        companion.start_attack("swing")
+                        break
+        else:
+            # Player left building - stop following
+            companion.follow_target = None
+            companion.vx = 0
+        
+        # Apply gravity and movement
+        companion.apply_gravity()
+        if building:
+            floor = building.floors[floor_num]
+            floor_platform = Platform(building.x, floor['y'], building.width, 5)
+            building_bounds = self.get_building_bounds()
+            companion.move_and_collide([floor_platform], building_bounds)
+        companion.update_attack_state()
 
     def empower_merchant(self, merchant):
-        mult = 3.0
+        mult = 1.5  # Reduced from 3.0 - merchant is tough but killable
         merchant.hp_max = int(merchant.hp_max * mult)
         merchant.hp = merchant.hp_max
         merchant.base_dmg = int(merchant.base_dmg * mult)
-        merchant.base_armor = int(merchant.base_armor * mult) + 5
+        merchant.base_armor = int(merchant.base_armor * mult) + 3
         if merchant.weapon:
             merchant.weapon.dmg = int(merchant.weapon.dmg * mult)
-            merchant.weapon.knockback = merchant.weapon.knockback * 1.5
+            merchant.weapon.knockback = merchant.weapon.knockback * 1.2
         if merchant.armor_item:
-            merchant.armor_item.armor = int(merchant.armor_item.armor * mult) + 3
+            merchant.armor_item.armor = int(merchant.armor_item.armor * mult) + 2
         merchant.money *= 2
 
     def generate(self):
@@ -1459,14 +2256,71 @@ class City:
         return None
     
     def enter_building(self, player, building):
-        """Enter a building - move player to first floor."""
+        """Enter a building - move player to first floor hall."""
         self.player_inside_building = building
         self.player_current_floor = 0
+        self.player_in_apartment = False  # Start in hall
         floor = building.floors[0]
         player.x = building.x + 50
         player.y = floor['y']
         player.vx = 0
         player.vy = 0
+    
+    def check_apartment_door(self, player):
+        """Check if player is at an apartment door. Returns True if can enter/exit."""
+        try:
+            if self.player_inside_building is None:
+                return False
+            
+            building = self.player_inside_building
+            if building is None or self.player_current_floor < 0 or self.player_current_floor >= len(building.floors):
+                return False
+            
+            floor = building.floors[self.player_current_floor]
+            if 'apartment_door_x' not in floor:
+                return False
+            
+            apartment_door_x = floor['apartment_door_x']
+            door_rect = pygame.Rect(apartment_door_x - 20, floor['y'] - building.floor_height, 40, building.floor_height)
+            return player.rect.colliderect(door_rect)
+        except (KeyError, IndexError, AttributeError):
+            return False
+    
+    def enter_apartment(self, player):
+        """Enter apartment room from hall."""
+        try:
+            if self.player_inside_building is None:
+                return
+            if self.player_current_floor < 0 or self.player_current_floor >= len(self.player_inside_building.floors):
+                return
+            self.player_in_apartment = True
+            building = self.player_inside_building
+            floor = building.floors[self.player_current_floor]
+            if 'apartment_door_x' not in floor:
+                return
+            # Move player into apartment room (to the right of door)
+            player.x = floor['apartment_door_x'] + 50
+            player.y = floor['y']
+        except (KeyError, IndexError, AttributeError):
+            pass
+    
+    def exit_apartment(self, player):
+        """Exit apartment room to hall."""
+        try:
+            if self.player_inside_building is None:
+                return
+            if self.player_current_floor < 0 or self.player_current_floor >= len(self.player_inside_building.floors):
+                return
+            self.player_in_apartment = False
+            building = self.player_inside_building
+            floor = building.floors[self.player_current_floor]
+            if 'apartment_door_x' not in floor:
+                return
+            # Move player to hall (to the left of door)
+            player.x = floor['apartment_door_x'] - 50
+            player.y = floor['y']
+        except (KeyError, IndexError, AttributeError):
+            pass
     
     def exit_building(self, player):
         """Exit the current building."""
@@ -1476,14 +2330,25 @@ class City:
             player.y = GROUND_Y  # Exit at ground level
             self.player_inside_building = None
             self.player_current_floor = 0
+            self.player_in_apartment = False
     
     def check_elevator(self, player):
-        """Check if player is at an elevator. Returns 'up', 'down', or None."""
+        """Check if player is at an elevator. Returns 'up', 'down', 'exit', or None."""
         if self.player_inside_building is None:
+            return None
+        
+        # Only check elevators when in hall (not in apartment)
+        if self.player_in_apartment:
             return None
         
         building = self.player_inside_building
         floor = building.floors[self.player_current_floor]
+        
+        # Check exit elevator (double down arrow) - only on ground floor
+        if self.player_current_floor == 0:
+            exit_elevator_rect = pygame.Rect(floor['elevator_exit_x'] - 15, floor['y'] - building.floor_height, 30, building.floor_height)
+            if player.rect.colliderect(exit_elevator_rect):
+                return 'exit'
         
         # Check up elevator
         if self.player_current_floor < building.num_floors - 1:
@@ -1518,14 +2383,24 @@ class City:
             player.y = floor['y']
             player.vx = 0
             player.vy = 0
+        
+            floor = self.player_inside_building.floors[self.player_current_floor]
+            player.x = self.player_inside_building.x + 50
+            player.y = floor['y']
+            player.vx = 0
+            player.vy = 0
     
     
     def get_current_floor_enemies(self):
-        """Get enemies on the current floor."""
+        """Get enemies on the current floor (only if player is in apartment)."""
         if self.player_inside_building:
             building = self.player_inside_building
             floor = building.floors[self.player_current_floor]
-            return floor['enemies']
+            # If player is in apartment, return apartment enemies; if in hall, return empty (halls are safe)
+            if self.player_in_apartment:
+                return floor.get('apartment_enemies', [])
+            else:
+                return []  # Halls are safe - no enemies
         return []
     
     def get_current_floor_containers(self):
@@ -1567,23 +2442,36 @@ class City:
             if item.is_potion and item.name == potion.name:
                 # Stack the potions
                 item.count += potion.count
+                # Show pickup notification
+                self.pickup_notifications.append(PickupNotification(f"Picked up: {potion.name} (x{potion.count})"))
                 return
         
         # No existing potion, add new one
         player.inventory.append(potion)
+        # Show pickup notification
+        self.pickup_notifications.append(PickupNotification(f"Picked up: {potion.name} (x{potion.count})"))
     
     def loot_container(self, player, container):
         """Loot a container - add item to inventory if it has one."""
         if container['looted'] or not container['item']:
             return False
         
+        item = container['item']
         # Stack potions if it's a potion
-        if container['item'].is_potion:
-            self.add_potion_to_inventory(player, container['item'])
+        if item.is_potion:
+            self.add_potion_to_inventory(player, item)
+            # Show pickup notification
+            self.pickup_notifications.append(PickupNotification(f"Picked up: {item.name} (x{item.count})"))
         else:
-            player.inventory.append(container['item'])
+            player.inventory.append(item)
+            # Show pickup notification
+            self.pickup_notifications.append(PickupNotification(f"Picked up: {item.name}"))
         container['looted'] = True
         return True
+    
+    def add_pickup_notification(self, text):
+        """Add a pickup notification."""
+        self.pickup_notifications.append(PickupNotification(text))
     
     def get_building_bounds(self):
         """Get building bounds for collision: (x, y, width, floor_y, ceiling_y) or None if outside."""
@@ -1851,38 +2739,116 @@ class City:
             else:
                 # Draw exterior of building
                 self.draw_building_exterior(surface, camera_x, building)
+        
+        # Draw ground graphic to cover bottom of buildings (drawn after buildings)
+        ground_graphic_height = 30  # Height of ground graphic above GROUND_Y
+        ground_graphic_rect = pygame.Rect(0 - camera_x, GROUND_Y - ground_graphic_height,
+                                         WORLD_WIDTH, ground_graphic_height)
+        # Draw ground with texture/pattern
+        base_ground_color = (25, 20, 18)
+        pygame.draw.rect(surface, base_ground_color, ground_graphic_rect)
+        
+        # Add some texture lines to make it look like ground/asphalt
+        for i in range(0, WORLD_WIDTH, 40):
+            line_x = i - camera_x
+            if 0 <= line_x < WIDTH:
+                pygame.draw.line(surface, (20, 16, 14), 
+                                (line_x, GROUND_Y - ground_graphic_height),
+                                (line_x, GROUND_Y), 1)
+        
+        # Add a darker line at the top edge to separate from buildings
+        pygame.draw.line(surface, (15, 12, 10),
+                        (0 - camera_x, GROUND_Y - ground_graphic_height),
+                        (WORLD_WIDTH - camera_x, GROUND_Y - ground_graphic_height), 2)
     
     def draw_building_exterior(self, surface, camera_x, building):
         """Draw the exterior of a building."""
         b_rect = building.exterior_rect.move(-camera_x, 0)
         if b_rect.right > -50 and b_rect.left < WIDTH + 50:
-            # Building exterior with texture - use multiple colors for variation
-            base_color = (40, 40, 45)
-            pygame.draw.rect(surface, base_color, b_rect)
+            # Save current random state
+            import random as random_module
+            old_state = random_module.getstate()
             
-            # Add texture with slightly different colored rectangles (use position-based pattern for consistency)
-            texture_size = 25
-            for ty in range(b_rect.top, b_rect.bottom, texture_size):
-                for tx in range(b_rect.left, b_rect.right, texture_size):
-                    # Use position-based hash for consistent texture
-                    hash_val = (tx + ty * 7) % 13
-                    color_variation = (hash_val - 6) * 2  # -12 to +12
+            # Use building's x position as seed for random but consistent texture per building
+            building_seed = int(building.x) % 10000
+            random_module.seed(building_seed)
+            
+            try:
+                # Random base color per building (darker, varied)
+                base_color_variations = [
+                    (35, 35, 40), (42, 38, 45), (38, 42, 48), (40, 40, 45),
+                    (45, 40, 42), (38, 45, 40), (40, 38, 48)
+                ]
+                base_color = random_module.choice(base_color_variations)
+                pygame.draw.rect(surface, base_color, b_rect)
+                
+                # Random texture size per building
+                texture_size_options = [15, 18, 20, 22, 25, 30, 35]
+                texture_size = random_module.choice(texture_size_options)
+                
+                # Sporadic texture pattern - random rectangles, not uniform grid
+                num_texture_patches = random_module.randint(30, 80)  # Random number of texture patches
+                texture_patches = []
+                
+                for _ in range(num_texture_patches):
+                    # Random position and size for each patch
+                    patch_x = random_module.randint(b_rect.left, b_rect.right - texture_size)
+                    patch_y = random_module.randint(b_rect.top, b_rect.bottom - texture_size)
+                    patch_w = random_module.randint(texture_size // 2, texture_size * 2)
+                    patch_h = random_module.randint(texture_size // 2, texture_size * 2)
+                    
+                    # Random color variation (more dramatic)
+                    color_var = random_module.randint(-25, 25)
                     texture_color = (
-                        max(30, min(55, base_color[0] + color_variation)),
-                        max(30, min(55, base_color[1] + color_variation)),
-                        max(35, min(60, base_color[2] + color_variation))
+                        max(20, min(65, base_color[0] + color_var)),
+                        max(20, min(65, base_color[1] + color_var)),
+                        max(25, min(70, base_color[2] + color_var))
                     )
-                    texture_rect = pygame.Rect(tx, ty, texture_size, texture_size)
-                    texture_rect = texture_rect.clip(b_rect)
-                    if texture_rect.width > 0 and texture_rect.height > 0:
-                        pygame.draw.rect(surface, texture_color, texture_rect)
-            
-            # Add some vertical lines for building panels (consistent pattern)
-            for panel_x in range(b_rect.left + 20, b_rect.right, 50):
-                if (panel_x // 50) % 3 == 0:  # Every 3rd panel
-                    pygame.draw.line(surface, (35, 35, 40),
-                                   (panel_x, b_rect.top),
-                                   (panel_x, b_rect.bottom), 1)
+                    
+                    texture_patches.append((patch_x, patch_y, patch_w, patch_h, texture_color))
+                
+                # Draw texture patches
+                for patch_x, patch_y, patch_w, patch_h, patch_color in texture_patches:
+                    patch_rect = pygame.Rect(patch_x, patch_y, patch_w, patch_h)
+                    patch_rect = patch_rect.clip(b_rect)
+                    if patch_rect.width > 0 and patch_rect.height > 0:
+                        pygame.draw.rect(surface, patch_color, patch_rect)
+                
+                # Random vertical lines - sporadic placement, not uniform
+                num_panels = random_module.randint(2, 8)
+                panel_positions = []
+                for _ in range(num_panels):
+                    panel_x = random_module.randint(b_rect.left + 20, b_rect.right - 20)
+                    panel_positions.append(panel_x)
+                
+                # Remove duplicates and sort
+                panel_positions = sorted(set(panel_positions))
+                
+                for panel_x in panel_positions:
+                    # Random chance to draw line, and random line color
+                    if random_module.random() < 0.6:  # 60% chance to draw
+                        line_color_variants = [
+                            (30, 30, 35), (35, 35, 40), (45, 40, 45),
+                            (25, 35, 40), (40, 30, 35)
+                        ]
+                        line_color = random_module.choice(line_color_variants)
+                        line_width = random_module.randint(1, 2)
+                        # Sometimes partial lines (not full height)
+                        if random_module.random() < 0.3:
+                            # Partial line
+                            line_start_y = random_module.randint(b_rect.top, b_rect.top + b_rect.height // 3)
+                            line_end_y = random_module.randint(b_rect.top + b_rect.height * 2 // 3, b_rect.bottom)
+                            pygame.draw.line(surface, line_color,
+                                           (panel_x, line_start_y),
+                                           (panel_x, line_end_y), line_width)
+                        else:
+                            # Full line
+                            pygame.draw.line(surface, line_color,
+                                           (panel_x, b_rect.top),
+                                           (panel_x, b_rect.bottom), line_width)
+            finally:
+                # Restore random state
+                random_module.setstate(old_state)
             
             # Windows on exterior
             window_colors = [
@@ -2010,8 +2976,8 @@ class City:
         # Front wall (where player entered) - make it invisible/transparent
         # Actually, we don't draw it so player can see out
         
-        # Up elevator door (if not on top floor)
-        if self.player_current_floor < building.num_floors - 1:
+        # Up elevator door (only visible in hall, not in apartment)
+        if not self.player_in_apartment and self.player_current_floor < building.num_floors - 1:
             up_elevator_x = floor['elevator_up_x'] - camera_x
             up_elevator_rect = pygame.Rect(up_elevator_x - 15, floor_y - building.floor_height - camera_y, 30, building.floor_height)
             pygame.draw.rect(surface, (120, 120, 120), up_elevator_rect)
@@ -2025,9 +2991,12 @@ class City:
             ])
             # Button
             pygame.draw.circle(surface, (255, 200, 0), (up_elevator_x, floor_y - 20 - camera_y), 5)
+            # Floor number
+            floor_text = FONT_SMALL.render(f"F{self.player_current_floor}", True, (255, 255, 255))
+            surface.blit(floor_text, (up_elevator_x - 10, floor_y - building.floor_height - camera_y - 20))
         
-        # Down elevator door (if not on ground floor)
-        if self.player_current_floor > 0:
+        # Down elevator door (only visible in hall, not in apartment)
+        if not self.player_in_apartment and self.player_current_floor > 0:
             down_elevator_x = floor['elevator_down_x'] - camera_x
             down_elevator_rect = pygame.Rect(down_elevator_x - 15, floor_y - building.floor_height - camera_y, 30, building.floor_height)
             pygame.draw.rect(surface, (120, 120, 120), down_elevator_rect)
@@ -2041,128 +3010,429 @@ class City:
             ])
             # Button
             pygame.draw.circle(surface, (255, 200, 0), (down_elevator_x, floor_y - 20 - camera_y), 5)
+            # Floor number
+            floor_text = FONT_SMALL.render(f"F{self.player_current_floor}", True, (255, 255, 255))
+            surface.blit(floor_text, (down_elevator_x - 10, floor_y - building.floor_height - camera_y - 20))
         
-        # Draw background assets (decorative items) - draw after wall so they appear on top
-        for asset in floor['background_assets']:
-            asset_x = asset['x'] - camera_x
-            asset_y = asset['y'] - camera_y
-            if -50 <= asset_x < WIDTH + 50:
-                if asset['type'] == 'chair':
-                    # Draw a simple chair
-                    chair_base_y = asset_y - 15
-                    # Chair seat
-                    pygame.draw.rect(surface, (139, 90, 43), 
-                                   (asset_x - 12, chair_base_y, 24, 8))
-                    # Chair back
-                    pygame.draw.rect(surface, (139, 90, 43), 
-                                   (asset_x - 12, chair_base_y - 20, 24, 20))
-                    # Chair legs
-                    pygame.draw.line(surface, (100, 70, 30), 
-                                   (asset_x - 10, chair_base_y + 8),
-                                   (asset_x - 10, asset_y), 2)
-                    pygame.draw.line(surface, (100, 70, 30), 
-                                   (asset_x + 10, chair_base_y + 8),
-                                   (asset_x + 10, asset_y), 2)
-                elif asset['type'] == 'plant':
-                    # Draw a potted plant
-                    pot_y = asset_y - 12
-                    # Pot
-                    pygame.draw.rect(surface, (80, 60, 40), 
-                                   (asset_x - 8, pot_y, 16, 12))
-                    # Plant leaves (simple circles)
-                    pygame.draw.circle(surface, (34, 139, 34), (asset_x, pot_y - 5), 10)
-                    pygame.draw.circle(surface, (50, 150, 50), (asset_x - 5, pot_y - 8), 8)
-                    pygame.draw.circle(surface, (50, 150, 50), (asset_x + 5, pot_y - 8), 8)
-                elif asset['type'] == 'tv':
-                    # Draw a TV hanging on the wall
-                    tv_y = asset_y - 20
-                    # TV screen (hanging on wall)
-                    pygame.draw.rect(surface, (20, 20, 20), 
-                                   (asset_x - 14, tv_y, 28, 18))
-                    # Screen glow
-                    pygame.draw.rect(surface, (100, 150, 200), 
-                                   (asset_x - 12, tv_y + 2, 24, 14))
-                    # TV frame
-                    pygame.draw.rect(surface, (40, 40, 40), 
-                                   (asset_x - 14, tv_y, 28, 18), 2)
-                    # Wall mount/bracket
-                    pygame.draw.rect(surface, (60, 60, 60), 
-                                   (asset_x - 16, tv_y - 3, 32, 3))
-                    # Mounting screws
-                    pygame.draw.circle(surface, (100, 100, 100), (asset_x - 12, tv_y - 1), 2)
-                    pygame.draw.circle(surface, (100, 100, 100), (asset_x + 12, tv_y - 1), 2)
+        # Exit elevator (double down arrow) - only on ground floor, only visible in hall
+        if not self.player_in_apartment and self.player_current_floor == 0:
+            exit_elevator_x = floor['elevator_exit_x'] - camera_x
+            exit_elevator_rect = pygame.Rect(exit_elevator_x - 15, floor_y - building.floor_height - camera_y, 30, building.floor_height)
+            pygame.draw.rect(surface, (120, 120, 120), exit_elevator_rect)
+            pygame.draw.rect(surface, (80, 80, 80), exit_elevator_rect, 2)  # Frame
+            # Double down arrow indicator
+            arrow_y = floor_y - building.floor_height // 2 - camera_y
+            # First arrow
+            pygame.draw.polygon(surface, (255, 100, 100), [
+                (exit_elevator_x, arrow_y + 8),
+                (exit_elevator_x - 6, arrow_y),
+                (exit_elevator_x + 6, arrow_y)
+            ])
+            # Second arrow (below first)
+            pygame.draw.polygon(surface, (255, 100, 100), [
+                (exit_elevator_x, arrow_y + 16),
+                (exit_elevator_x - 6, arrow_y + 8),
+                (exit_elevator_x + 6, arrow_y + 8)
+            ])
+            # Button
+            pygame.draw.circle(surface, (255, 100, 100), (exit_elevator_x, floor_y - 20 - camera_y), 5)
+            # Floor number
+            floor_text = FONT_SMALL.render(f"F{self.player_current_floor}", True, (255, 255, 255))
+            surface.blit(floor_text, (exit_elevator_x - 10, floor_y - building.floor_height - camera_y - 20))
         
-        # Draw lootable containers
-        for container in floor['containers']:
-            container_x = container['x'] - camera_x
-            container_y = container['y'] - camera_y
-            if -50 <= container_x < WIDTH + 50:
-                if container['type'] == 'chest':
-                    # Draw a chest
-                    chest_y = container_y - 20
-                    # Chest base
-                    pygame.draw.rect(surface, (139, 90, 43), 
-                                   (container_x - 15, chest_y, 30, 15))
-                    # Chest lid (slightly open if looted)
-                    lid_offset = 2 if container['looted'] else 0
-                    pygame.draw.rect(surface, (120, 80, 40), 
-                                   (container_x - 15, chest_y - 5 + lid_offset, 30, 5))
-                    # Chest lock/handle
-                    if not container['looted']:
+        # Draw background assets (decorative items) - only show in halls, not in apartments
+        if not self.player_in_apartment:
+            for asset in floor['background_assets']:
+                asset_x = asset['x'] - camera_x
+                asset_y = asset['y'] - camera_y
+                if -50 <= asset_x < WIDTH + 50:
+                    if asset['type'] == 'chair':
+                        # Draw a simple chair
+                        chair_base_y = asset_y - 15
+                        # Chair seat
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (asset_x - 12, chair_base_y, 24, 8))
+                        # Chair back
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (asset_x - 12, chair_base_y - 20, 24, 20))
+                        # Chair legs
+                        pygame.draw.line(surface, (100, 70, 30), 
+                                       (asset_x - 10, chair_base_y + 8),
+                                       (asset_x - 10, asset_y), 2)
+                        pygame.draw.line(surface, (100, 70, 30), 
+                                       (asset_x + 10, chair_base_y + 8),
+                                       (asset_x + 10, asset_y), 2)
+                    elif asset['type'] == 'plant':
+                        # Draw a potted plant
+                        pot_y = asset_y - 12
+                        # Pot
+                        pygame.draw.rect(surface, (80, 60, 40), 
+                                       (asset_x - 8, pot_y, 16, 12))
+                        # Plant leaves (simple circles)
+                        pygame.draw.circle(surface, (34, 139, 34), (asset_x, pot_y - 5), 10)
+                        pygame.draw.circle(surface, (50, 150, 50), (asset_x - 5, pot_y - 8), 8)
+                        pygame.draw.circle(surface, (50, 150, 50), (asset_x + 5, pot_y - 8), 8)
+                    elif asset['type'] == 'tv':
+                        # Draw a TV hanging on the wall
+                        tv_y = asset_y - 20
+                        # TV screen (hanging on wall)
+                        pygame.draw.rect(surface, (20, 20, 20), 
+                                       (asset_x - 14, tv_y, 28, 18))
+                        # Screen glow
+                        pygame.draw.rect(surface, (100, 150, 200), 
+                                       (asset_x - 12, tv_y + 2, 24, 14))
+                        # TV frame
+                        pygame.draw.rect(surface, (40, 40, 40), 
+                                       (asset_x - 14, tv_y, 28, 18), 2)
+                        # Wall mount/bracket
+                        pygame.draw.rect(surface, (60, 60, 60), 
+                                       (asset_x - 16, tv_y - 3, 32, 3))
+                        # Mounting screws
+                        pygame.draw.circle(surface, (100, 100, 100), (asset_x - 12, tv_y - 1), 2)
+                        pygame.draw.circle(surface, (100, 100, 100), (asset_x + 12, tv_y - 1), 2)
+                    elif asset['type'] == 'fire_extinguisher':
+                        # Fire extinguisher cabinet on wall
+                        cabinet_y = asset_y - 25
+                        # Cabinet body
+                        pygame.draw.rect(surface, (180, 50, 50), 
+                                       (asset_x - 8, cabinet_y, 16, 25))
+                        # Glass front
+                        pygame.draw.rect(surface, (200, 220, 255, 150), 
+                                       (asset_x - 6, cabinet_y + 2, 12, 20))
+                        # Handle
+                        pygame.draw.rect(surface, (60, 60, 60), 
+                                       (asset_x - 10, cabinet_y + 8, 20, 4))
+                        # Label text area
+                        pygame.draw.rect(surface, (255, 255, 255), 
+                                       (asset_x - 7, cabinet_y + 5, 14, 3))
+                    elif asset['type'] == 'mailbox':
+                        # Mailbox on wall
+                        box_y = asset_y - 15
+                        # Mailbox body
+                        pygame.draw.rect(surface, (70, 70, 80), 
+                                       (asset_x - 10, box_y, 20, 15))
+                        # Mail slot
+                        pygame.draw.rect(surface, (20, 20, 25), 
+                                       (asset_x - 8, box_y + 3, 16, 8))
+                        # Door handle
+                        pygame.draw.circle(surface, (100, 100, 100), 
+                                         (asset_x + 8, box_y + 9), 2)
+                    elif asset['type'] == 'door_buzzer':
+                        # Door buzzer/intercom on wall
+                        buzzer_y = asset_y - 12
+                        # Main panel
+                        pygame.draw.rect(surface, (50, 50, 60), 
+                                       (asset_x - 10, buzzer_y, 20, 15))
+                        # Speaker grill
+                        for i in range(3):
+                            pygame.draw.line(surface, (80, 80, 90), 
+                                           (asset_x - 8, buzzer_y + 5 + i * 2),
+                                           (asset_x + 8, buzzer_y + 5 + i * 2), 1)
+                        # Buttons
+                        pygame.draw.circle(surface, (150, 150, 150), 
+                                         (asset_x - 4, buzzer_y + 11), 3)
+                        pygame.draw.circle(surface, (150, 150, 150), 
+                                         (asset_x + 4, buzzer_y + 11), 3)
+                    elif asset['type'] == 'security_camera':
+                        # Security camera on wall/ceiling
+                        cam_y = asset_y - 18
+                        # Camera body
+                        pygame.draw.circle(surface, (40, 40, 45), (asset_x, cam_y), 8)
+                        # Lens
+                        pygame.draw.circle(surface, (20, 20, 30), (asset_x, cam_y), 5)
+                        pygame.draw.circle(surface, (100, 100, 120), (asset_x, cam_y), 3)
+                        # Mount bracket
+                        pygame.draw.rect(surface, (60, 60, 65), 
+                                       (asset_x - 10, cam_y - 12, 20, 4))
+                        # LED indicator
+                        pygame.draw.circle(surface, (255, 0, 0), 
+                                         (asset_x + 6, cam_y - 2), 2)
+                    elif asset['type'] == 'vending_machine':
+                        # Vending machine on floor (much bigger - 50px wide, 80px tall)
+                        machine_y = asset_y - 80  # Much taller machine
+                        # Machine body (bigger)
+                        pygame.draw.rect(surface, (60, 80, 100), 
+                                       (asset_x - 25, machine_y, 50, 80))
+                        # Glass front
+                        pygame.draw.rect(surface, (150, 180, 200, 120), 
+                                       (asset_x - 23, machine_y + 3, 46, 70))
+                        # Product slots (grid) - more slots
+                        for row in range(5):
+                            for col in range(2):
+                                slot_x = asset_x - 20 + col * 18
+                                slot_y = machine_y + 10 + row * 13
+                                pygame.draw.rect(surface, (100, 120, 140), 
+                                               (slot_x, slot_y, 14, 12), 1)
+                                # Sometimes show healing potion in slot
+                                if hasattr(asset, 'has_potion') and asset.get('has_potion', False) and row == 0 and col == 0:
+                                    pygame.draw.circle(surface, (255, 100, 100), (slot_x + 7, slot_y + 6), 4)
+                        # Coin slot
+                        pygame.draw.circle(surface, (80, 80, 80), 
+                                         (asset_x, machine_y + 75), 4)
+                        # Selection buttons
                         pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x, chest_y + 5), 3)
-                    # Glow if has item
-                    if container['item'] and not container['looted']:
-                        glow_surf = pygame.Surface((35, 25), pygame.SRCALPHA)
-                        pygame.draw.circle(glow_surf, (255, 200, 0, 100), (17, 12), 15)
-                        surface.blit(glow_surf, (container_x - 17, chest_y - 5))
-                elif container['type'] == 'dresser':
-                    # Draw a dresser
-                    dresser_y = container_y - 25
-                    # Dresser body
-                    pygame.draw.rect(surface, (139, 90, 43), 
-                                   (container_x - 18, dresser_y, 36, 25))
-                    # Drawers
-                    pygame.draw.line(surface, (100, 70, 30), 
-                                   (container_x - 18, dresser_y + 8),
-                                   (container_x + 18, dresser_y + 8), 2)
-                    pygame.draw.line(surface, (100, 70, 30), 
-                                   (container_x - 18, dresser_y + 16),
-                                   (container_x + 18, dresser_y + 16), 2)
-                    # Drawer handles
-                    if not container['looted']:
+                                         (asset_x - 15, machine_y + 75), 3)
                         pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x - 10, dresser_y + 4), 2)
-                        pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x + 10, dresser_y + 4), 2)
-                        pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x - 10, dresser_y + 12), 2)
-                        pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x + 10, dresser_y + 12), 2)
-                    # Glow if has item
-                    if container['item'] and not container['looted']:
-                        glow_surf = pygame.Surface((40, 30), pygame.SRCALPHA)
-                        pygame.draw.circle(glow_surf, (255, 200, 0, 100), (20, 15), 18)
-                        surface.blit(glow_surf, (container_x - 20, dresser_y - 5))
-                elif container['type'] == 'wardrobe':
-                    # Draw a wardrobe
-                    wardrobe_y = container_y - 35
-                    # Wardrobe body
-                    pygame.draw.rect(surface, (139, 90, 43), 
-                                   (container_x - 12, wardrobe_y, 24, 35))
-                    # Door
-                    door_color = (120, 80, 40) if container['looted'] else (139, 90, 43)
-                    pygame.draw.rect(surface, door_color, 
-                                   (container_x - 12, wardrobe_y, 12, 35))
-                    # Door handle
-                    if not container['looted']:
-                        pygame.draw.circle(surface, (200, 200, 200), 
-                                         (container_x - 3, wardrobe_y + 17), 2)
-                    # Glow if has item
-                    if container['item'] and not container['looted']:
-                        glow_surf = pygame.Surface((30, 40), pygame.SRCALPHA)
-                        pygame.draw.circle(glow_surf, (255, 200, 0, 100), (15, 20), 18)
-                        surface.blit(glow_surf, (container_x - 15, wardrobe_y - 5))
+                                         (asset_x + 15, machine_y + 75), 3)
+                    elif asset['type'] == 'trash_bin':
+                        # Trash bin on floor
+                        bin_y = asset_y - 20
+                        # Bin body
+                        pygame.draw.rect(surface, (50, 50, 55), 
+                                       (asset_x - 8, bin_y, 16, 20))
+                        # Lid
+                        pygame.draw.ellipse(surface, (60, 60, 65), 
+                                          (asset_x - 8, bin_y - 3, 16, 6))
+                        # Recycling symbol area (colored section)
+                        pygame.draw.rect(surface, (0, 120, 0), 
+                                       (asset_x - 6, bin_y + 2, 12, 16))
+                        # Handles
+                        pygame.draw.arc(surface, (80, 80, 80), 
+                                      (asset_x - 10, bin_y + 5, 8, 10), 0, 3.14, 2)
+                        pygame.draw.arc(surface, (80, 80, 80), 
+                                      (asset_x + 2, bin_y + 5, 8, 10), 0, 3.14, 2)
+                    elif asset['type'] == 'bulletin_board':
+                        # Bulletin board on wall
+                        board_y = asset_y - 25
+                        # Board frame
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (asset_x - 15, board_y, 30, 25))
+                        # Cork board surface
+                        pygame.draw.rect(surface, (139, 110, 80), 
+                                       (asset_x - 13, board_y + 2, 26, 21))
+                        # Notices/papers (random)
+                        pygame.draw.rect(surface, (255, 255, 255), 
+                                       (asset_x - 10, board_y + 5, 8, 6))
+                        pygame.draw.rect(surface, (255, 255, 255), 
+                                       (asset_x + 2, board_y + 8, 8, 6))
+                        pygame.draw.rect(surface, (255, 255, 200), 
+                                       (asset_x - 8, board_y + 15, 10, 5))
+                        # Push pins
+                        pygame.draw.circle(surface, (200, 50, 50), 
+                                         (asset_x - 7, board_y + 7), 1)
+                        pygame.draw.circle(surface, (200, 50, 50), 
+                                         (asset_x + 5, board_y + 11), 1)
+                        pygame.draw.circle(surface, (200, 50, 50), 
+                                         (asset_x - 5, board_y + 17), 1)
+                    elif asset['type'] == 'elevator_panel':
+                        # Elevator control panel on wall
+                        panel_y = asset_y - 20
+                        # Panel body
+                        pygame.draw.rect(surface, (40, 40, 50), 
+                                       (asset_x - 8, panel_y, 16, 20))
+                        # Buttons grid (4x4)
+                        for row in range(3):
+                            for col in range(2):
+                                btn_x = asset_x - 6 + col * 6
+                                btn_y = panel_y + 3 + row * 5
+                                pygame.draw.circle(surface, (100, 150, 200), 
+                                                 (btn_x, btn_y), 2)
+                                # Button glow
+                                pygame.draw.circle(surface, (150, 200, 255), 
+                                                 (btn_x, btn_y), 1)
+                        # Up/Down arrows
+                        pygame.draw.polygon(surface, (200, 200, 0), [
+                            (asset_x - 6, panel_y + 18),
+                            (asset_x - 2, panel_y + 14),
+                            (asset_x + 2, panel_y + 14)
+                        ])
+                        pygame.draw.polygon(surface, (200, 200, 0), [
+                            (asset_x + 6, panel_y + 18),
+                            (asset_x + 2, panel_y + 14),
+                            (asset_x - 2, panel_y + 14)
+                        ])
+                    elif asset['type'] == 'emergency_exit_sign':
+                        # Emergency exit sign on wall/ceiling
+                        sign_y = asset_y - 12
+                        # Sign box
+                        pygame.draw.rect(surface, (200, 50, 50), 
+                                       (asset_x - 12, sign_y, 24, 12))
+                        # Exit text area (white)
+                        pygame.draw.rect(surface, (255, 255, 255), 
+                                       (asset_x - 10, sign_y + 2, 20, 6))
+                        # Arrow
+                        pygame.draw.polygon(surface, (255, 255, 0), [
+                            (asset_x + 8, sign_y + 5),
+                            (asset_x + 6, sign_y + 3),
+                            (asset_x + 6, sign_y + 7)
+                        ])
+                        # Glow effect
+                        glow_surf = pygame.Surface((26, 14), pygame.SRCALPHA)
+                        pygame.draw.rect(glow_surf, (255, 150, 150, 60), (0, 0, 26, 14))
+                        surface.blit(glow_surf, (asset_x - 13, sign_y - 1))
+                    elif asset['type'] == 'utility_panel':
+                        # Utility panel/breaker box on wall
+                        panel_y = asset_y - 18
+                        # Panel box
+                        pygame.draw.rect(surface, (30, 30, 35), 
+                                       (asset_x - 10, panel_y, 20, 18))
+                        # Door
+                        pygame.draw.rect(surface, (50, 50, 55), 
+                                       (asset_x - 9, panel_y + 1, 18, 16))
+                        # Hinges
+                        pygame.draw.circle(surface, (80, 80, 80), 
+                                         (asset_x - 8, panel_y + 4), 1)
+                        pygame.draw.circle(surface, (80, 80, 80), 
+                                         (asset_x - 8, panel_y + 14), 1)
+                        # Breaker switches (rows)
+                        for i in range(4):
+                            switch_x = asset_x - 6 + (i % 2) * 6
+                            switch_y = panel_y + 4 + (i // 2) * 5
+                            pygame.draw.rect(surface, (200, 200, 200), 
+                                           (switch_x - 2, switch_y, 4, 3))
+                            # Switch indicator
+                            pygame.draw.circle(surface, (0, 200, 0), 
+                                             (switch_x, switch_y + 1), 1)
+        
+        # Draw apartment door (visible in both hall and apartment)
+        apartment_door_x = floor['apartment_door_x'] - camera_x
+        apartment_door_y = floor_y - camera_y
+        if -50 <= apartment_door_x < WIDTH + 50:
+            if self.player_in_apartment:
+                # In apartment - show door back to hall (on left side)
+                door_rect = pygame.Rect(apartment_door_x - 20, apartment_door_y - building.floor_height, 40, building.floor_height)
+                pygame.draw.rect(surface, (100, 80, 60), door_rect)  # Brown door
+                pygame.draw.rect(surface, (60, 40, 20), door_rect, 2)  # Frame
+                # Door handle
+                pygame.draw.circle(surface, (200, 200, 200), (apartment_door_x - 10, apartment_door_y - building.floor_height // 2), 3)
+            else:
+                # In hall - show door to apartment (on right side)
+                door_rect = pygame.Rect(apartment_door_x - 20, apartment_door_y - building.floor_height, 40, building.floor_height)
+                pygame.draw.rect(surface, (100, 80, 60), door_rect)  # Brown door
+                pygame.draw.rect(surface, (60, 40, 20), door_rect, 2)  # Frame
+                # Door handle
+                pygame.draw.circle(surface, (200, 200, 200), (apartment_door_x + 10, apartment_door_y - building.floor_height // 2), 3)
+        
+        # Draw lootable containers (only in apartments)
+        if self.player_in_apartment:
+            for container in floor['containers']:
+                container_x = container['x'] - camera_x
+                container_y = container['y'] - camera_y
+                if -50 <= container_x < WIDTH + 50:
+                    if container['type'] == 'chest':
+                        # Draw a chest
+                        chest_y = container_y - 20
+                        # Chest base
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (container_x - 15, chest_y, 30, 15))
+                        # Chest lid (slightly open if looted)
+                        lid_offset = 2 if container['looted'] else 0
+                        pygame.draw.rect(surface, (120, 80, 40), 
+                                       (container_x - 15, chest_y - 5 + lid_offset, 30, 5))
+                        # Chest lock/handle
+                        if not container['looted']:
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x, chest_y + 5), 3)
+                        # Glow if has item
+                        if container['item'] and not container['looted']:
+                            glow_surf = pygame.Surface((35, 25), pygame.SRCALPHA)
+                            pygame.draw.circle(glow_surf, (255, 200, 0, 100), (17, 12), 15)
+                            surface.blit(glow_surf, (container_x - 17, chest_y - 5))
+                    elif container['type'] == 'dresser':
+                        # Draw a dresser
+                        dresser_y = container_y - 25
+                        # Dresser body
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (container_x - 18, dresser_y, 36, 25))
+                        # Drawers
+                        pygame.draw.line(surface, (100, 70, 30), 
+                                       (container_x - 18, dresser_y + 8),
+                                       (container_x + 18, dresser_y + 8), 2)
+                        pygame.draw.line(surface, (100, 70, 30), 
+                                       (container_x - 18, dresser_y + 16),
+                                       (container_x + 18, dresser_y + 16), 2)
+                        # Drawer handles
+                        if not container['looted']:
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x - 10, dresser_y + 4), 2)
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x + 10, dresser_y + 4), 2)
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x - 10, dresser_y + 12), 2)
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x + 10, dresser_y + 12), 2)
+                        # Glow if has item
+                        if container['item'] and not container['looted']:
+                            glow_surf = pygame.Surface((40, 30), pygame.SRCALPHA)
+                            pygame.draw.circle(glow_surf, (255, 200, 0, 100), (20, 15), 18)
+                            surface.blit(glow_surf, (container_x - 20, dresser_y - 5))
+                    elif container['type'] == 'wardrobe':
+                        # Draw a wardrobe
+                        wardrobe_y = container_y - 35
+                        # Wardrobe body
+                        pygame.draw.rect(surface, (139, 90, 43), 
+                                       (container_x - 12, wardrobe_y, 24, 35))
+                        # Door
+                        door_color = (120, 80, 40) if container['looted'] else (139, 90, 43)
+                        pygame.draw.rect(surface, door_color, 
+                                       (container_x - 12, wardrobe_y, 12, 35))
+                        # Door handle
+                        if not container['looted']:
+                            pygame.draw.circle(surface, (200, 200, 200), 
+                                             (container_x - 3, wardrobe_y + 17), 2)
+                        # Glow if has item
+                        if container['item'] and not container['looted']:
+                            glow_surf = pygame.Surface((30, 40), pygame.SRCALPHA)
+                            pygame.draw.circle(glow_surf, (255, 200, 0, 100), (15, 20), 18)
+                            surface.blit(glow_surf, (container_x - 15, wardrobe_y - 5))
+        
+        # Draw apartment furniture (only in apartments)
+        if self.player_in_apartment:
+            for furniture in floor.get('apartment_assets', []):
+                furniture_x = furniture['x'] - camera_x
+                furniture_y = furniture['y'] - camera_y
+                if -50 <= furniture_x < WIDTH + 50:
+                    if furniture['type'] == 'bed_single':
+                        # Single bed
+                        bed_y = furniture_y - 15
+                        # Mattress
+                        pygame.draw.rect(surface, (200, 200, 220), (furniture_x - 25, bed_y, 50, 20))
+                        # Pillow
+                        pygame.draw.ellipse(surface, (255, 255, 255), (furniture_x - 20, bed_y - 3, 15, 8))
+                        # Bed frame
+                        pygame.draw.rect(surface, (139, 90, 43), (furniture_x - 25, bed_y + 20, 50, 5))
+                    elif furniture['type'] == 'bed_double':
+                        # Double bed
+                        bed_y = furniture_y - 15
+                        # Mattress
+                        pygame.draw.rect(surface, (200, 200, 220), (furniture_x - 35, bed_y, 70, 20))
+                        # Pillows
+                        pygame.draw.ellipse(surface, (255, 255, 255), (furniture_x - 30, bed_y - 3, 15, 8))
+                        pygame.draw.ellipse(surface, (255, 255, 255), (furniture_x + 15, bed_y - 3, 15, 8))
+                        # Bed frame
+                        pygame.draw.rect(surface, (139, 90, 43), (furniture_x - 35, bed_y + 20, 70, 5))
+                    elif furniture['type'] == 'dresser':
+                        # Dresser
+                        dresser_y = furniture_y - 30
+                        pygame.draw.rect(surface, (139, 90, 43), (furniture_x - 15, dresser_y, 30, 30))
+                        # Drawer lines
+                        pygame.draw.line(surface, (100, 70, 30), (furniture_x - 15, dresser_y + 10), (furniture_x + 15, dresser_y + 10), 2)
+                        pygame.draw.line(surface, (100, 70, 30), (furniture_x - 15, dresser_y + 20), (furniture_x + 15, dresser_y + 20), 2)
+                        # Handles
+                        pygame.draw.circle(surface, (200, 200, 200), (furniture_x - 8, dresser_y + 5), 2)
+                        pygame.draw.circle(surface, (200, 200, 200), (furniture_x + 8, dresser_y + 5), 2)
+                    elif furniture['type'] == 'refrigerator':
+                        # Refrigerator (bigger)
+                        fridge_y = furniture_y - 70  # Much taller
+                        # Body (bigger - 28px wide, 70px tall)
+                        pygame.draw.rect(surface, (220, 220, 220), (furniture_x - 14, fridge_y, 28, 70))
+                        # Door
+                        pygame.draw.rect(surface, (200, 200, 200), (furniture_x - 14, fridge_y, 14, 70))
+                        # Handle
+                        pygame.draw.circle(surface, (100, 100, 100), (furniture_x + 10, fridge_y + 35), 2)
+                        # Freezer section (top)
+                        pygame.draw.line(surface, (180, 180, 180), (furniture_x - 14, fridge_y + 20), (furniture_x + 14, fridge_y + 20), 2)
+                    elif furniture['type'] == 'television':
+                        # Television (on wall or stand)
+                        tv_y = furniture_y - 25
+                        # TV screen
+                        pygame.draw.rect(surface, (20, 20, 20), (furniture_x - 18, tv_y, 36, 22))
+                        # Screen glow
+                        pygame.draw.rect(surface, (100, 150, 200), (furniture_x - 16, tv_y + 2, 32, 18))
+                        # TV frame
+                        pygame.draw.rect(surface, (40, 40, 40), (furniture_x - 18, tv_y, 36, 22), 2)
+                        # Stand/base
+                        pygame.draw.rect(surface, (60, 60, 60), (furniture_x - 12, tv_y + 22, 24, 3))
         
         # Draw enemies on floor (they will be drawn separately in main loop, but we can add a marker)
         # Actually, enemies are drawn in main loop, so we don't need to draw them here
@@ -2260,6 +3530,8 @@ class ShopUI:
             return
         item = lst[self.sel_index]
         if self.merchant.money >= item.price:
+            # Check if player is selling near a dog (dog selling detection)
+            # This would need city reference - for now, we'll handle it in quest updates
             # Unequip if selling equipped item
             if self.player.weapon is item:
                 self.player.weapon = None
@@ -2336,9 +3608,10 @@ class PauseMenuUI:
         self.selected_index = 0
         self.request_quit = False
 
-    def open(self, player):
+    def open(self, player, city=None):
         self.active = True
         self.player = player
+        self.city = city  # Store city reference for quests
         self.refresh_entries()
         self.selected_index = 0
         self.request_quit = False
@@ -2354,6 +3627,10 @@ class PauseMenuUI:
             self.entries = []
             return
         self.entries = list(self.player.inventory) + ["Quit Game"]
+    
+    def set_city(self, city):
+        """Set the city reference for quest display."""
+        self.city = city
 
     def handle_key(self, e):
         if not self.active:
@@ -2412,19 +3689,40 @@ class PauseMenuUI:
         title = FONT_MED.render("PAUSE / INVENTORY", True, (255, 255, 255))
         surface.blit(title, (panel.x + 140, panel.y + 10))
 
-        # Player stats display
+        # Player stats display (like in shop)
         if self.player:
             stats_y = panel.y + 35
-            stats_text = FONT_SMALL.render(
-                f"HP: {self.player.hp}/{self.player.hp_max} | "
-                f"Dmg: {self.player.total_damage()} | "
-                f"Arm: {self.player.total_armor()} | "
-                f"Money: {self.player.money}",
-                True, (200, 255, 200)
-            )
-            surface.blit(stats_text, (panel.x + 30, stats_y))
+            # Calculate additional stats
+            attack_delay = self.player.attack_delay()
+            knockback = self.player.total_knockback()
+            # Show all stats similar to shop format
+            stats_parts = [
+                f"HP: {self.player.hp}/{self.player.hp_max}",
+                f"Dmg: {self.player.total_damage()}",
+                f"Arm: {self.player.total_armor()}",
+                f"AS: {attack_delay}f",
+                f"KB: {knockback:.1f}" if knockback > 0 else "",
+                f"Money: {self.player.money}"
+            ]
+            stats_text = " | ".join([s for s in stats_parts if s])  # Filter out empty strings
+            stats_display = FONT_SMALL.render(stats_text, True, (200, 255, 200))
+            surface.blit(stats_display, (panel.x + 30, stats_y))
 
+        # Show active quests
         y = panel.y + 60
+        if hasattr(self, 'city') and self.city and self.city.quests:
+            quest_title = FONT_SMALL.render("ACTIVE QUESTS:", True, (255, 200, 100))
+            surface.blit(quest_title, (panel.x + 30, y))
+            y += 22
+            for quest in self.city.quests:
+                if quest.status == "active":
+                    status_color = (150, 255, 150) if quest.status == "completed" else (255, 150, 150) if quest.status == "failed" else (200, 200, 255)
+                    quest_text = FONT_SMALL.render(f"• {quest.description}", True, status_color)
+                    surface.blit(quest_text, (panel.x + 40, y))
+                    y += 20
+            y += 10  # Spacing before inventory
+
+        # Inventory items
         for i, entry in enumerate(self.entries):
             is_sel = (i == self.selected_index)
             prefix = "* " if is_sel else "  "
@@ -2434,10 +3732,10 @@ class PauseMenuUI:
                     label += f" (x{entry.count})"
                     if entry is self.player.potion_slot:
                         label += " [Q]"
-                elif entry.dmg:
-                    label += f" {entry.dmg} Dmg"
-                elif entry.armor:
-                    label += f" {entry.armor} Arm"
+                # Show full stats like in shop (Dmg, Arm, AS, KB)
+                stats_desc = entry.desc()
+                if stats_desc and stats_desc != "No bonus":
+                    label += f" ({stats_desc})"
                 if entry is self.player.weapon or entry is self.player.armor_item:
                     label += " [Equipped]"
             else:
@@ -2562,7 +3860,7 @@ def generate_initial_player():
 
     if chosen == "shortsword":
         w = Item("Short Sword", dmg=8, armor=0,
-                 atk_speed_bonus=0.10, knockback=3, price=0,
+                 atk_speed_bonus=0.35, knockback=3, price=0,
                  visual="shortsword")
     elif chosen == "longsword":
         w = Item("Long Sword", dmg=12, armor=0,
@@ -2607,8 +3905,19 @@ def find_nearby_merchant(player, units):
 def handle_combat_between(attacker, defender):
     hb = attacker.get_attack_hitbox()
     if hb and not attacker.attack_has_hit and hb.colliderect(defender.rect):
+        # Apply damage
         defender.take_hit(attacker.total_damage())
         attacker.attack_has_hit = True
+        
+        # Apply knockback based on attacker's weapon
+        knockback = attacker.total_knockback()
+        if knockback > 0:
+            # Determine knockback direction (from attacker to defender)
+            direction = 1 if attacker.x < defender.x else -1
+            # Apply knockback with timer - reduced by 70% (30% of original)
+            defender.knockback_vx = knockback * direction * 2.4  # 30% of 8.0 = 2.4x multiplier
+            defender.knockback_timer = 20  # Knockback lasts 20 frames
+        
         if defender.was_merchant and not defender.merchant_hostile:
             defender.become_hostile(attacker)
 #^^^^^^^^^^^
@@ -2648,7 +3957,7 @@ def main():
                     elif shop_ui.active:
                         shop_ui.close()
                     else:
-                        pause_menu.open(player)
+                        pause_menu.open(player, city)
 
                 elif pause_menu.active:
                     pause_menu.handle_key(e)
@@ -2658,8 +3967,8 @@ def main():
 
                 else:
                     if e.key == pygame.K_q:
-                        # Use potion from Q slot
-                        if player.potion_slot and player.potion_slot.count > 0:
+                        # Use potion from Q slot - can't use when dead
+                        if not player.is_dead() and player.potion_slot and player.potion_slot.count > 0:
                             # Heal player
                             heal_amount = player.potion_slot.heal_amount
                             player.hp = min(player.hp_max, player.hp + heal_amount)
@@ -2674,11 +3983,13 @@ def main():
                     elif e.key == pygame.K_RETURN:
                         # Check building interactions first
                         if city.player_inside_building:
-                            # Check elevator
-                            elevator_dir = city.check_elevator(player)
-                            if elevator_dir:
-                                city.use_elevator(player, elevator_dir)
-                            # Check container looting
+                            # Check apartment door first (Enter key can also interact with doors)
+                            if city.check_apartment_door(player):
+                                if city.player_in_apartment:
+                                    city.exit_apartment(player)
+                                else:
+                                    city.enter_apartment(player)
+                            # Check container looting (only if not at door)
                             else:
                                 container = city.check_container_loot(player)
                                 if container:
@@ -2698,12 +4009,32 @@ def main():
                         DEBUG_HITBOXES = not DEBUG_HITBOXES
                     elif e.key == pygame.K_e:
                         if city.player_inside_building:
-                            # Exit building
-                            city.exit_building(player)
+                            # Check apartment door first
+                            if city.check_apartment_door(player):
+                                if city.player_in_apartment:
+                                    city.exit_apartment(player)
+                                else:
+                                    city.enter_apartment(player)
+                            else:
+                                # Check elevator (E key triggers elevators)
+                                elevator_dir = city.check_elevator(player)
+                                if elevator_dir:
+                                    city.use_elevator(player, elevator_dir)
+                                else:
+                                    # Check for completed quest NPC to claim reward
+                                    npc, quest = city.check_nearby_completed_quest_npc(player)
+                                    if npc and quest:
+                                        city.claim_quest_reward(quest, player)
                         else:
-                            m = find_nearby_merchant(player, city.units)
-                            if m and not m.is_dead():
-                                shop_ui.open(player, m)
+                            # Check for NPC with quest
+                            npc, quest = city.check_nearby_npc(player)
+                            if npc and quest:
+                                city.accept_quest(quest)
+                            else:
+                                # Check for merchant
+                                m = find_nearby_merchant(player, city.units)
+                                if m and not m.is_dead():
+                                    shop_ui.open(player, m)
 
         if pause_menu.request_quit:
             running = False
@@ -2730,6 +4061,38 @@ def main():
             
             player.update_regen(dt)
 
+            # ---- QUEST UPDATES ----
+            city.update_quests(player)
+            
+            # ---- DOG UPDATES ----
+            for dog in city.dogs:
+                # Dog follows player once player gets close (within 100 pixels)
+                dx = player.x - dog.x
+                dy = player.y - dog.y
+                dist = math.sqrt(dx*dx + dy*dy) if dx != 0 or dy != 0 else 0
+                if dist < 100:  # Player is close - dog starts following
+                    dog.follow_player = player
+                    # Update dog's building/floor to match player's
+                    if city.player_inside_building:
+                        dog.inside_building = city.player_inside_building
+                        dog.building_floor_num = city.player_current_floor
+                    else:
+                        dog.inside_building = None
+                
+                # Only update dog if it's following player
+                if dog.follow_player:
+                    if city.player_inside_building:
+                        building = city.player_inside_building
+                        floor = building.floors[city.player_current_floor]
+                        floor_platform = Platform(building.x, floor['y'], building.width, 5)
+                        building_bounds = city.get_building_bounds()
+                        dog.update(player, [floor_platform], building_bounds)
+                        # Update dog's floor to match player's
+                        dog.building_floor_num = city.player_current_floor
+                    else:
+                        dog.update(player, city.platforms, None)
+                        dog.inside_building = None
+            
             # ---- ENEMY AI ----
             # Update enemies on current floor if inside building
             if city.player_inside_building:
@@ -2737,6 +4100,13 @@ def main():
                 building_bounds = city.get_building_bounds()
                 for u in floor_enemies:
                     if not u.is_dead():
+                        # Skip NPCs - they have their own AI
+                        if u.is_npc and not u.is_companion:
+                            continue
+                        # Companion NPCs follow player
+                        if u.is_companion:
+                            city.update_companion_npc(u, player, city.player_inside_building, city.player_current_floor)
+                            continue
                         building = city.player_inside_building
                         floor = building.floors[city.player_current_floor]
                         floor_platform = Platform(building.x, floor['y'], building.width, 5)
@@ -2745,6 +4115,13 @@ def main():
                 # Update all enemies - check if they're in buildings
                 for u in city.units:
                     if not u.is_dead():
+                        # Skip NPCs - they have their own AI
+                        if u.is_npc and not u.is_companion:
+                            continue
+                        # Companion NPCs follow player
+                        if u.is_companion:
+                            city.update_companion_npc(u, player, None, 0)
+                            continue
                         # Check if enemy is inside a building
                         enemy_building_bounds = city.get_enemy_building_bounds(u)
                         if enemy_building_bounds:
@@ -2765,28 +4142,32 @@ def main():
                 # Only combat with enemies on current floor
                 floor_enemies = city.get_current_floor_enemies()
                 for u in floor_enemies:
-                    if not u.is_dead():
+                    if not u.is_dead() and not u.is_npc:  # Don't fight NPCs
                         handle_combat_between(player, u)
-                        handle_combat_between(u, player)
+                        # NPCs don't attack player, but companions attack enemies
+                        if not u.is_npc:
+                            handle_combat_between(u, player)
             else:
                 # Combat with all units
                 for u in city.units:
-                    if not u.is_dead():
+                    if not u.is_dead() and not u.is_npc:  # Don't fight NPCs
                         handle_combat_between(player, u)
-                    handle_combat_between(u, player)
+                        if not u.is_npc:
+                            handle_combat_between(u, player)
 
             # ---- LOOT / CLEANUP ----
             for u in city.units:
-                if u.is_dead() and not u.is_merchant:
+                if u.is_dead():
                     if u.money > 0:
                         player.money += u.money
                         u.money = 0
-                    # Chance to drop potion
+                    # Chance to drop potion (for all enemies including merchants)
                     if random.random() < 0.15:  # 15% chance
                         settings = STAGE_SETTINGS.get(city.stage, STAGE_SETTINGS[4])
                         potion = city.generate_potion_for_stage(settings)
                         # Add potion to player inventory (stack if already have potions)
                         city.add_potion_to_inventory(player, potion)
+            # Remove dead enemies, but keep dead merchants (they stay on ground)
             city.units = [u for u in city.units if not (u.is_dead() and not u.is_merchant)]
 
             # ---- CAMERA ----
@@ -2816,7 +4197,7 @@ def main():
         city.draw_background(SCREEN, camera_x, camera_y)
         city.draw_static_level(SCREEN, camera_x, camera_y, player)
 
-        # Draw enemies
+        # Draw enemies and NPCs
         if city.player_inside_building:
             # Draw enemies on current floor (always visible when inside)
             floor_enemies = city.get_current_floor_enemies()
@@ -2834,7 +4215,66 @@ def main():
                     else:
                         # Enemy is outside, always visible
                         u.draw(SCREEN, camera_x, 0, debug=DEBUG_HITBOXES)
+        
+        # Draw NPC dialogue/quest text above NPCs when player is close
+        for u in city.units:
+            if u.is_npc and not u.is_dead():
+                # Check distance to player
+                dx = u.x - player.x
+                dy = u.y - player.y
+                dist_sq = dx*dx + dy*dy
+                if dist_sq < 10000:  # Within 100 pixels
+                    # Draw dialogue text above NPC
+                    dialogue_text = getattr(u, 'dialogue', '')
+                    if dialogue_text:
+                        # Find quest for this NPC
+                        quest_text = ""
+                        for quest in city.quests:
+                            if quest.npc == u:
+                                if quest.status == "offered":
+                                    quest_text = " [Press E to accept]"
+                                elif quest.status == "active":
+                                    quest_text = " [Quest Active]"
+                                elif quest.status == "completed":
+                                    quest_text = " [Completed]"
+                                break
+                        
+                        # Draw text above NPC
+                        text_y_offset = -40
+                        if city.player_inside_building:
+                            npc_screen_x = int(u.x - camera_x)
+                            npc_screen_y = int(u.y - camera_y)
+                        else:
+                            npc_screen_x = int(u.x - camera_x)
+                            npc_screen_y = int(u.y)
+                        
+                        # Draw dialogue
+                        dialogue_surf = FONT_SMALL.render(dialogue_text, True, (255, 255, 200))
+                        text_width = dialogue_surf.get_width()
+                        # Background for text
+                        bg_rect = pygame.Rect(npc_screen_x - text_width // 2 - 5, npc_screen_y + text_y_offset - 2, text_width + 10, 16)
+                        pygame.draw.rect(SCREEN, (0, 0, 0, 180), bg_rect)
+                        SCREEN.blit(dialogue_surf, (npc_screen_x - text_width // 2, npc_screen_y + text_y_offset))
+                        
+                        # Draw quest status if available
+                        if quest_text:
+                            quest_surf = FONT_SMALL.render(quest_text, True, (200, 255, 200))
+                            quest_width = quest_surf.get_width()
+                            quest_bg_rect = pygame.Rect(npc_screen_x - quest_width // 2 - 5, npc_screen_y + text_y_offset + 14, quest_width + 10, 16)
+                            pygame.draw.rect(SCREEN, (0, 0, 0, 180), quest_bg_rect)
+                            SCREEN.blit(quest_surf, (npc_screen_x - quest_width // 2, npc_screen_y + text_y_offset + 16))
 
+        # Draw dogs
+        for dog in city.dogs:
+            if city.player_inside_building:
+                # Only draw dog if on current floor
+                if dog.inside_building == city.player_inside_building and dog.building_floor_num == city.player_current_floor:
+                    dog.draw(SCREEN, camera_x, camera_y)
+            else:
+                # Draw dog if outside
+                if not dog.inside_building:
+                    dog.draw(SCREEN, camera_x, 0)
+        
         # Draw projectiles after units so they appear above the level but below UI
         for proj in PROJECTILES:
             proj.draw(SCREEN, camera_x, camera_y)
@@ -2887,6 +4327,25 @@ def main():
 
         shop_ui.draw(SCREEN)
         pause_menu.draw(SCREEN)
+        
+        # Draw pickup notifications at bottom
+        notification_y = HEIGHT - 40
+        for notif in city.pickup_notifications[:]:
+            notif.timer -= 1
+            if notif.timer <= 0:
+                city.pickup_notifications.remove(notif)
+                continue
+            
+            # Fade out in last 60 frames
+            if notif.timer < 60:
+                notif.alpha = int(255 * (notif.timer / 60))
+            
+            # Draw notification text
+            text_surface = FONT_SMALL.render(notif.text, True, (255, 255, 200))
+            text_surface.set_alpha(notif.alpha)
+            text_x = WIDTH // 2 - text_surface.get_width() // 2
+            SCREEN.blit(text_surface, (text_x, notification_y))
+            notification_y -= 25  # Stack multiple notifications
 
         pygame.display.flip()
 
